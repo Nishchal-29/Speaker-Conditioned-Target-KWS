@@ -1,166 +1,14 @@
-# import os
-# import sys
-# import types
-# import soundfile as sf
-# import numpy as np
-# import librosa
-# import torch
-# import torch.nn.functional as F
-# import torchaudio
-# from speechbrain.inference.speaker import EncoderClassifier
-
-# # --- BUG FIX FOR WINDOWS / PYTORCH 2.x ---
-# os.environ["TORCH_DYNAMO_DISABLE"] = "1"
-# sys.modules['k2'] = types.ModuleType('k2')
-# sys.modules['flair'] = types.ModuleType('flair')
-# sys.modules['speechbrain.integrations.nlp.flair_embeddings'] = types.ModuleType('fake_flair_emb')
-# sys.modules['speechbrain.integrations.nlp'] = types.ModuleType('fake_nlp')
-# sys.modules['speechbrain.integrations.huggingface.wordemb'] = types.ModuleType('fake_wordemb')
-# sys.modules['speechbrain.integrations.huggingface'] = types.ModuleType('fake_hf')
-# # -----------------------------------------
-
-# torch._dynamo.config.disable = True 
-
-# class SpeakerVerifier:
-#     def __init__(self, checkpoint_path, device="cuda" if torch.cuda.is_available() else "cpu", 
-#                  target_snr=-5, n_mels=80, max_frames=400):
-#         self.device = torch.device(device)
-#         print(f"Loading verifier on {self.device}...")
-        
-#         # --- FIX: Define the hyperparameters needed for PCEN and Noise ---
-#         self.target_snr = target_snr
-#         self.n_mels = n_mels
-#         self.max_frames = max_frames
-        
-#         # 1. Load the base ECAPA-TDNN architecture
-#         self.classifier = EncoderClassifier.from_hparams(
-#             source="speechbrain/spkrec-ecapa-voxceleb", 
-#             savedir="./models/speechbrain_cache",
-#             run_opts={"device": str(self.device)}
-#         )
-#         self.encoder = self.classifier.mods.embedding_model.to(self.device)
-        
-#         # 2. Load your fine-tuned weights into the encoder
-#         if os.path.exists(checkpoint_path):
-#             checkpoint = torch.load(checkpoint_path, map_location=self.device)
-#             self.encoder.load_state_dict(checkpoint['encoder_state_dict'])
-#             print(f"Successfully loaded fine-tuned weights from Epoch {checkpoint['epoch']} (Train Acc: {checkpoint['accuracy']:.2f}%)")
-#         else:
-#             raise FileNotFoundError(f"Could not find checkpoint at {checkpoint_path}")
-            
-#         self.encoder.eval() # Set to evaluation mode
-    
-#     def inject_noise(self, y):
-#         """Calculates audio power and injects noise to hit the exact target SNR."""
-#         signal_power = np.mean(y ** 2)
-#         if signal_power == 0:
-#             return y  
-            
-#         noise_power = signal_power / (10 ** (self.target_snr / 10))
-#         noise = np.random.normal(0, np.sqrt(noise_power), len(y))
-        
-#         return y + noise
-
-#     def extract_embedding(self, audio_path):
-#         """Processes the audio and extracts the 192-D voice print."""
-        
-#         # 1. Read audio using SoundFile (Bypassing Windows TorchCodec bug)
-#         audio_array, sr = sf.read(audio_path)
-        
-#         # 2. Ensure it's a 1D mono numpy array for Librosa
-#         if len(audio_array.shape) > 1:
-#             audio_array = np.mean(audio_array, axis=1)
-            
-#         # 3. Resample to 16kHz if necessary
-#         if sr != 16000:
-#             audio_array = librosa.resample(audio_array, orig_sr=sr, target_sr=16000)
-#             sr = 16000
-            
-#         # 4. Inject Noise
-#         # y_noisy = self.inject_noise(audio_array)
-#         y_noisy = audio_array
-        
-#         # 5. Compute Mel and apply PCEN
-#         mel = librosa.feature.melspectrogram(y=y_noisy, sr=sr, n_mels=self.n_mels, hop_length=256)
-#         pcen = librosa.pcen(S=mel * (2**31), sr=sr, hop_length=256).T 
-        
-#         # 6. Pad or truncate for uniform sizing (Shape: [frames, n_mels])
-#         if pcen.shape[0] < self.max_frames:
-#             pad_width = self.max_frames - pcen.shape[0]
-#             pcen = np.pad(pcen, ((0, pad_width), (0, 0)), mode='constant')
-#         else:
-#             pcen = pcen[:self.max_frames, :]
-            
-#         # --- FIX: Convert Numpy array to PyTorch Tensor, add batch dim, and send to device ---
-#         # Shape goes from [frames, n_mels] -> [1, frames, n_mels]
-#         # --- FIX: Convert Numpy array to PyTorch Tensor, add batch dim, and send to device ---
-#         # Shape goes from [frames, n_mels] -> [1, frames, n_mels]
-#         pcen_tensor = torch.FloatTensor(pcen).unsqueeze(0).to(self.device)
-        
-#         with torch.no_grad():
-#             # --- CRITICAL FIX: Apply the exact same normalization used in training ---
-#             mean = pcen_tensor.mean(dim=1, keepdim=True)
-#             std = pcen_tensor.std(dim=1, keepdim=True)
-#             pcen_tensor = (pcen_tensor - mean) / (std + 1e-5)
-#             # -------------------------------------------------------------------------
-            
-#             embedding = self.encoder(pcen_tensor)
-#             embedding = embedding.squeeze(1) 
-            
-#         return embedding
-
-#     def verify(self, audio_path_1, audio_path_2, threshold=0.45):
-#         """Compares two audio files and returns the similarity score and a boolean match."""
-#         print(f"\nComparing:\n1. {audio_path_1}\n2. {audio_path_2}")
-        
-#         emb1 = self.extract_embedding(audio_path_1)
-#         emb2 = self.extract_embedding(audio_path_2)
-        
-#         # Calculate Cosine Similarity
-#         similarity = F.cosine_similarity(emb1, emb2).item()
-        
-#         is_match = similarity >= threshold
-        
-#         print(f"Cosine Similarity Score: {similarity:.4f}")
-#         if is_match:
-#             print(f"✅ MATCH! These voices likely belong to the SAME speaker.")
-#         else:
-#             print(f"❌ NO MATCH! These voices likely belong to DIFFERENT speakers.")
-            
-#         return similarity, is_match
-
-# if __name__ == "__main__":
-#     # Point this to your latest saved model
-#     CHECKPOINT_FILE = "./finetuned_models/ecapa_pcen_epoch_10.pth" 
-    
-#     # You can tweak target_snr, n_mels, and max_frames here to match your training data!
-#     # FIX: Change max_frames to 300 to match dataset.py
-#     verifier = SpeakerVerifier(checkpoint_path=CHECKPOINT_FILE, target_snr=-5, n_mels=80, max_frames=300)
-#     # Test 1: Should be the same speaker
-#     speaker_A_file1 = "./data/LibriSpeech/dev-clean/84/121123/84-121123-0000.flac"
-#     speaker_A_file2 = "./data/LibriSpeech/dev-clean/84/121123/84-121123-0020.flac"
-    
-#     # Test 2: Different speaker
-#     speaker_B_file1 = "./data/LibriSpeech/dev-clean/174/50561/174-50561-0002.flac"
-    
-#     if os.path.exists(speaker_A_file1) and os.path.exists(speaker_A_file2):
-#         print("\n--- TEST: SAME SPEAKER ---")
-#         verifier.verify(speaker_A_file1, speaker_A_file2)
-        
-#         if os.path.exists(speaker_B_file1):
-#             print("\n--- TEST: DIFFERENT SPEAKERS ---")
-#             verifier.verify(speaker_A_file1, speaker_B_file1)
-#     else:
-#         print("Please update the audio paths in the script to point to actual .wav or .flac files on your machine.")
-
 import os
 import sys
 import types
-import torch
-import torch.nn.functional as F
-import librosa
+import json
+import itertools
+import urllib.request
+
 import numpy as np
-from speechbrain.inference.speaker import EncoderClassifier
+import librosa
+import onnxruntime as ort
+import soundfile as sf
 
 # --- BUG FIX FOR WINDOWS / PYTORCH 2.x ---
 os.environ["TORCH_DYNAMO_DISABLE"] = "1"
@@ -170,104 +18,410 @@ sys.modules['speechbrain.integrations.nlp.flair_embeddings'] = types.ModuleType(
 sys.modules['speechbrain.integrations.nlp'] = types.ModuleType('fake_nlp')
 sys.modules['speechbrain.integrations.huggingface.wordemb'] = types.ModuleType('fake_wordemb')
 sys.modules['speechbrain.integrations.huggingface'] = types.ModuleType('fake_hf')
-torch._dynamo.config.disable = True 
 # -----------------------------------------
 
-def load_and_prep_audio(file_path, target_sr=16000, max_audio_length=48000):
+import torch
+import torch.nn.functional as F
+
+try:
+    torch._dynamo.config.disable = True
+except Exception:
+    pass
+
+from pcen import PCENProcessor
+from metrics import compute_eer
+
+
+# ============================================================================
+# ONNX Speaker Verifier
+# ============================================================================
+
+class OnnxSpeakerVerifier:
     """
-    Loads any audio format, strips dead silence, and loops (tiles) short audio 
-    to perfectly mirror the training data distribution.
+    Speaker verification using the exported ONNX backbone + PCEN sidecar.
+
+    This class performs:
+      1. Audio loading and preprocessing
+      2. PCEN feature extraction (frozen params from sidecar)
+      3. ONNX inference → 192-D L2-normalised embedding
+      4. Cosine similarity comparison
+
+    Also provides run_eer_validation() for the 50-pair EER check
+    required by Context A Step 6e.
     """
-    # 1. Load audio natively via Librosa (handles decoding and downmixing automatically)
-    wav, _ = librosa.load(file_path, sr=target_sr, mono=True)
+
+    def __init__(self, onnx_model_path, pcen_params_path, sample_rate=16000):
+        """
+        Args:
+            onnx_model_path: Path to the exported ECAPA-TDNN ONNX backbone.
+            pcen_params_path: Path to the PCEN parameter JSON sidecar.
+            sample_rate: Audio sample rate (must be 16kHz).
+        """
+        # Load ONNX model
+        self.session = ort.InferenceSession(
+            onnx_model_path,
+            providers=['CPUExecutionProvider']
+        )
+        self.input_name = self.session.get_inputs()[0].name
+        self.output_name = self.session.get_outputs()[0].name
+
+        # Load PCEN parameters (Invariant #1: byte-for-byte identical to Context A)
+        with open(pcen_params_path, 'r') as f:
+            pcen_params = json.load(f)
+
+        self.pcen = PCENProcessor(pcen_params, sample_rate=sample_rate)
+        self.sr = sample_rate
+
+        print(f"[OnnxSpeakerVerifier] Loaded ONNX model: {onnx_model_path}")
+        print(f"  PCEN params: s={pcen_params['s']:.6f}, "
+              f"α={pcen_params['alpha']:.6f}, "
+              f"δ={pcen_params['delta']:.6f}, "
+              f"r={pcen_params['r']:.6f}")
+
+    def extract_embedding(self, audio_path, max_audio_length=48000):
+        """
+        Extract a 192-D L2-normalised embedding from an audio file.
+
+        Pipeline: load → trim → tile/truncate → PCEN → normalize → ONNX → L2-norm
+
+        Args:
+            audio_path: Path to an audio file.
+            max_audio_length: Target length in samples (48000 = 3s @ 16kHz).
+
+        Returns:
+            embedding: numpy float32[192], L2-normalised.
+        """
+        # Load audio
+        wav, _ = librosa.load(audio_path, sr=self.sr, mono=True)
+
+        # Strip silence
+        trimmed, _ = librosa.effects.trim(wav, top_db=30)
+        if len(trimmed) > 0:
+            wav = trimmed
+
+        # Tile or truncate
+        if len(wav) < max_audio_length:
+            repeats = int(np.ceil(max_audio_length / len(wav)))
+            wav = np.tile(wav, repeats)[:max_audio_length]
+        else:
+            wav = wav[:max_audio_length]
+
+        # PCEN
+        pcen_features = self.pcen.process(wav)  # [n_mels, T]
+
+        # Prepare for ONNX: [1, n_mels, T]
+        pcen_input = pcen_features[np.newaxis, :, :].astype(np.float32)
+
+        # Utterance-level normalization (match training)
+        pcen_transposed = np.transpose(pcen_input, (0, 2, 1))  # [1, T, n_mels]
+        mean = np.mean(pcen_transposed, axis=1, keepdims=True)
+        std = np.std(pcen_transposed, axis=1, keepdims=True)
+        pcen_transposed = (pcen_transposed - mean) / (std + 1e-5)
+        pcen_input = np.transpose(pcen_transposed, (0, 2, 1))  # [1, n_mels, T]
+
+        # ONNX inference
+        raw_embedding = self.session.run(
+            [self.output_name],
+            {self.input_name: pcen_input}
+        )[0].squeeze()
+
+        # L2-normalise (Invariant #3)
+        norm = np.linalg.norm(raw_embedding)
+        if norm > 0:
+            embedding = raw_embedding / norm
+        else:
+            embedding = raw_embedding
+
+        return embedding.astype(np.float32)
+
+    def verify(self, audio_path_1, audio_path_2, threshold=0.45):
+        """
+        Compare two audio files and return similarity score + match decision.
+
+        Args:
+            audio_path_1: Path to first audio file.
+            audio_path_2: Path to second audio file.
+            threshold: Cosine similarity threshold for positive match.
+
+        Returns:
+            similarity: float — cosine similarity score.
+            is_match: bool — True if similarity >= threshold.
+        """
+        emb1 = self.extract_embedding(audio_path_1)
+        emb2 = self.extract_embedding(audio_path_2)
+
+        # Cosine similarity (both L2-normalised → dot product)
+        similarity = float(np.dot(emb1, emb2))
+        is_match = similarity >= threshold
+
+        return similarity, is_match
+
+    def run_eer_validation(self, data_dir, n_same=25, n_diff=25, file_ext="flac",
+                           seed=42):
+        """
+        Run the 50-pair EER validation check required by Context A Step 6e.
+
+        Generates 25 same-speaker pairs and 25 different-speaker pairs from
+        the provided data directory, computes cosine similarities, and
+        calculates EER.
+
+        Args:
+            data_dir: Path to audio directory (LibriSpeech-style structure).
+            n_same: Number of same-speaker pairs.
+            n_diff: Number of different-speaker pairs.
+            file_ext: Audio file extension.
+            seed: Random seed for pair selection.
+
+        Returns:
+            eer: float — the Equal Error Rate.
+            threshold: float — the EER threshold.
+            report: dict — detailed validation report.
+        """
+        import glob
+
+        print(f"\n{'=' * 50}")
+        print("EER VALIDATION (50-pair check)")
+        print(f"{'=' * 50}\n")
+
+        # Discover speakers and their files
+        all_files = sorted(glob.glob(f"{data_dir}/**/*.{file_ext}", recursive=True))
+        speaker_files = {}
+        for f in all_files:
+            spk = f.split(os.sep)[-3]
+            if spk not in speaker_files:
+                speaker_files[spk] = []
+            speaker_files[spk].append(f)
+
+        speakers = sorted(speaker_files.keys())
+        print(f"Found {len(speakers)} speakers, {len(all_files)} files")
+
+        # Filter speakers with at least 2 files (needed for same-speaker pairs)
+        valid_speakers = [s for s in speakers if len(speaker_files[s]) >= 2]
+        print(f"Speakers with ≥ 2 files: {len(valid_speakers)}")
+
+        rng = np.random.RandomState(seed)
+
+        # Generate same-speaker pairs
+        same_pairs = []
+        attempts = 0
+        while len(same_pairs) < n_same and attempts < n_same * 10:
+            spk = rng.choice(valid_speakers)
+            files = speaker_files[spk]
+            idx = rng.choice(len(files), size=2, replace=False)
+            pair = (files[idx[0]], files[idx[1]])
+            if pair not in same_pairs:
+                same_pairs.append(pair)
+            attempts += 1
+
+        # Generate different-speaker pairs
+        diff_pairs = []
+        attempts = 0
+        while len(diff_pairs) < n_diff and attempts < n_diff * 10:
+            spk1, spk2 = rng.choice(valid_speakers, size=2, replace=False)
+            f1 = rng.choice(speaker_files[spk1])
+            f2 = rng.choice(speaker_files[spk2])
+            pair = (f1, f2)
+            if pair not in diff_pairs:
+                diff_pairs.append(pair)
+            attempts += 1
+
+        print(f"Generated {len(same_pairs)} same-speaker + {len(diff_pairs)} diff-speaker pairs\n")
+
+        # Compute similarities
+        scores = []
+        labels = []
+
+        print("Computing similarities...")
+        for i, (f1, f2) in enumerate(same_pairs):
+            sim, _ = self.verify(f1, f2)
+            scores.append(sim)
+            labels.append(1)
+            print(f"  Same {i + 1}/{len(same_pairs)}: {sim:.4f}")
+
+        for i, (f1, f2) in enumerate(diff_pairs):
+            sim, _ = self.verify(f1, f2)
+            scores.append(sim)
+            labels.append(0)
+            print(f"  Diff {i + 1}/{len(diff_pairs)}: {sim:.4f}")
+
+        # Compute EER
+        eer, threshold = compute_eer(scores, labels)
+
+        report = {
+            "eer": float(eer),
+            "threshold": float(threshold),
+            "n_same_pairs": len(same_pairs),
+            "n_diff_pairs": len(diff_pairs),
+            "same_scores_mean": float(np.mean([s for s, l in zip(scores, labels) if l == 1])),
+            "diff_scores_mean": float(np.mean([s for s, l in zip(scores, labels) if l == 0])),
+            "passed": eer < 0.05,
+        }
+
+        print(f"\n{'=' * 50}")
+        print(f"EER: {eer:.4f} (threshold: {threshold:.4f})")
+        print(f"Same-speaker mean: {report['same_scores_mean']:.4f}")
+        print(f"Diff-speaker mean: {report['diff_scores_mean']:.4f}")
+
+        if report['passed']:
+            print(f"✅ PASSED — EER < 5%")
+        else:
+            print(f"⚠️  FAILED — EER ≥ 5%")
+
+        print(f"{'=' * 50}\n")
+
+        return eer, threshold, report
+
+
+def run_noisy_onnx_test(onnx_path, pcen_path):
+    print("\nInitializing Production ONNX Pipeline...")
+    verifier = OnnxSpeakerVerifier(onnx_model_path=onnx_path, pcen_params_path=pcen_path)
     
-    # 2. Strip dead silence (Matches dataset.py top_db=30)
-    wav_trimmed, _ = librosa.effects.trim(wav, top_db=30)
-    if len(wav_trimmed) > 0:
-        wav = wav_trimmed
-        
-    # 3. Tile (loop) short audio to match the exact 3-second window
-    if len(wav) < max_audio_length:
-        repeats = int(np.ceil(max_audio_length / len(wav)))
-        wav = np.tile(wav, repeats)[:max_audio_length]
-    else:
-        wav = wav[:max_audio_length]
-        
-    # Convert to PyTorch tensor expected by SpeechBrain
-    return torch.FloatTensor(wav)
+    # Test files from LibriSpeech dev-clean
+    file_A1 = "./data/LibriSpeech/dev-clean/84/121123/84-121123-0000.flac"  # Speaker A, Utterance 1
+    file_A2 = "./data/LibriSpeech/dev-clean/84/121550/84-121550-0000.flac"  # Speaker A, Utterance 2
+    file_B1 = "./data/LibriSpeech/dev-clean/174/50561/174-50561-0000.flac" # Speaker B, Utterance 1
 
-def inject_noise(signal, target_snr=-5):
-    """Injects Gaussian noise into a 1D PyTorch audio tensor."""
-    signal_power = torch.mean(signal ** 2)
-    if signal_power == 0:
-        return signal
+    def generate_synthetic_babble(duration_sec, sr=16000):
+        """
+        Generates non-stationary noise mimicking a crowded room.
+        It creates 50 overlapping voices with random human-speech frequencies
+        and amplitude modulations (simulating breathing/pauses).
+        """
+        time = np.linspace(0, duration_sec, int(sr * duration_sec))
+        babble = np.zeros_like(time)
         
-    noise_power = signal_power / (10 ** (target_snr / 10))
-    noise = torch.randn_like(signal) * torch.sqrt(noise_power)
+        # Simulate 50 people talking at once
+        for _ in range(50):
+            base_freq = np.random.uniform(300, 3000) # Human speech band
+            
+            # Slow amplitude wobble to simulate pauses in talking
+            amp_mod = np.sin(2 * np.pi * np.random.uniform(0.5, 2.5) * time)
+            amp_mod = np.maximum(0, amp_mod) # Half-wave rectify to create hard silences
+            
+            phase = np.random.uniform(0, 2 * np.pi)
+            babble += amp_mod * np.sin(2 * np.pi * base_freq * time + phase)
+            
+        # Normalize to avoid clipping
+        return babble / np.max(np.abs(babble))
+
+    print("Generating offline synthetic babble noise...")
+    wav_A2, sr = librosa.load(file_A2, sr=16000, mono=True)
     
-    return signal + noise
+    # Generate the exact amount of noise we need
+    duration = len(wav_A2) / sr
+    wav_noise = generate_synthetic_babble(duration_sec=duration, sr=sr)
 
-def verify_speakers():
-    print("Loading Base SpeechBrain Model...")
-    classifier = EncoderClassifier.from_hparams(
-        source="speechbrain/spkrec-ecapa-voxceleb", 
-        savedir="./finetuned_models/speechbrain_cache"
-    )
-
-    # 1. Inject your fine-tuned weights
-    checkpoint_path = "./finetuned_models/ecapa_raw_epoch_15.pth"
-    if not os.path.exists(checkpoint_path):
-        raise FileNotFoundError(f"Could not find checkpoint at {checkpoint_path}")
+    def mix_audio_at_snr(clean_audio, noise_audio, target_snr):
+        """Mixes clean speech with a real noise file at a specific SNR."""
+        # Ensure lengths match
+        if len(noise_audio) > len(clean_audio):
+            noise_audio = noise_audio[:len(clean_audio)]
+        elif len(noise_audio) < len(clean_audio):
+            # Tile the noise if it's too short
+            repeats = int(np.ceil(len(clean_audio) / len(noise_audio)))
+            noise_audio = np.tile(noise_audio, repeats)[:len(clean_audio)]
+            
+        clean_power = np.mean(clean_audio ** 2)
+        noise_power = np.mean(noise_audio ** 2)
         
-    print(f"Injecting fine-tuned weights from {checkpoint_path}...")
-    checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))
-    classifier.mods.embedding_model.load_state_dict(checkpoint['encoder_state_dict'])
-    classifier.mods.embedding_model.eval()
-
-    # 2. Define your test files
-    speaker_A_file1 = "./data/LibriSpeech/dev-clean/84/121123/84-121123-0000.flac"
-    speaker_A_file2 = "./data/LibriSpeech/dev-clean/84/121550/84-121550-0000.flac"
-    speaker_B_file1 = "./data/LibriSpeech/dev-clean/174/50561/174-50561-0000.flac"
-
-    print("\nLoading Audio and Injecting Noise...")
+        # Calculate the multiplier required for the noise to hit the target SNR
+        if noise_power == 0:
+            return clean_audio
+            
+        k = np.sqrt((clean_power / (10 ** (target_snr / 10))) / noise_power)
+        
+        # Mix them
+        noisy_signal = clean_audio + (noise_audio * k)
+        
+        # Prevent clipping
+        max_val = np.max(np.abs(noisy_signal))
+        if max_val > 1.0:
+            noisy_signal = noisy_signal / max_val
+            
+        return noisy_signal
     
-    # 3. Load with the corrected pipeline
-    raw_A1 = load_and_prep_audio(speaker_A_file1)
-    raw_A2 = load_and_prep_audio(speaker_A_file2)
-    raw_B1 = load_and_prep_audio(speaker_B_file1)
+    noisy_A2 = mix_audio_at_snr(wav_A2, wav_noise, target_snr=-5)
+    
+    temp_noisy_path = "./temp_realistic_noisy_A2.wav"
+    sf.write(temp_noisy_path, noisy_A2, sr)
 
-    # Inject -5dB noise across all options to establish an even baseline evaluation environment
-    noisy_A1 = raw_A1
-    noisy_A2 = raw_A2
-    noisy_B1 = raw_B1
-    noisy_A1 = inject_noise(raw_A1, target_snr=-5)
-    # noisy_A2 = inject_noise(raw_A2, target_snr=-5)
-    noisy_B1 = inject_noise(raw_B1, target_snr=-5)
+    try:
+        print("\n--- TEST 1: SAME SPEAKER (Clean A1 vs Babble Noisy A2 @ -5dB) ---")
+        sim_same, match_same = verifier.verify(file_A1, temp_noisy_path, threshold=0.25)
+        print(f"Cosine Similarity Score: {sim_same:.4f}")
+        if match_same:
+            print("MATCH! The ONNX model successfully saw through the realistic noise.")
+        else:
+            print("NO MATCH. The noise caused a false rejection.")
 
-    print("Extracting Embeddings natively...")
-    with torch.no_grad():
-        # encode_batch expects shape [batch, time]
-        emb_A1 = classifier.encode_batch(noisy_A1.unsqueeze(0)).squeeze()
-        emb_A2 = classifier.encode_batch(noisy_A2.unsqueeze(0)).squeeze()
-        emb_B1 = classifier.encode_batch(noisy_B1.unsqueeze(0)).squeeze()
-
-    # 4. Calculate Cosine Similarities
-    sim_same = F.cosine_similarity(emb_A1.unsqueeze(0), emb_A2.unsqueeze(0)).item()
-    sim_diff = F.cosine_similarity(emb_A1.unsqueeze(0), emb_B1.unsqueeze(0)).item()
-
-    print("\n--- TEST: SAME SPEAKER ---")
-    print(f"Cosine Similarity Score: {sim_same:.4f}")
-    if sim_same > 0.15:
-        print("✅ MATCH! These voices likely belong to the SAME speaker.")
-    else:
-        print("❌ NO MATCH.")
-
-    print("\n--- TEST: DIFFERENT SPEAKERS ---")
-    print(f"Cosine Similarity Score: {sim_diff:.4f}")
-    if sim_diff > 0.15:
-        print("❌ FALSE POSITIVE MATCH! (Check data)")
-    else:
-        print("✅ CORRECT REJECTION! These are different speakers.")
+        print("\n--- TEST 2: DIFFERENT SPEAKERS (Clean A1 vs Clean B1) ---")
+        sim_diff, match_diff = verifier.verify(file_A1, file_B1, threshold=0.25)
+        print(f"Cosine Similarity Score: {sim_diff:.4f}")
+        if match_diff:
+            print("FALSE POSITIVE MATCH! (Check threshold)")
+        else:
+            print("CORRECT REJECTION! These are different speakers.")
+            
+    finally:
+        # Cleanup temp files
+        if os.path.exists(temp_noisy_path):
+            os.remove(temp_noisy_path)
 
 if __name__ == "__main__":
-    verify_speakers()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Speaker Verification / EER Validation")
+    parser.add_argument("--mode", choices=["verify", "eer", "noise_test"], default="eer")
+    parser.add_argument("--onnx", default="./finetuned_models/ecapa_backbone.onnx",
+                       help="Path to ONNX backbone model")
+    parser.add_argument("--pcen", default="./finetuned_models/pcen_params.json",
+                       help="Path to PCEN parameter sidecar JSON")
+    parser.add_argument("--data", default="./data/LibriSpeech/dev-clean",
+                       help="Path to audio data directory (for EER mode)")
+    parser.add_argument("--audio1", help="First audio file (for verify mode)")
+    parser.add_argument("--audio2", help="Second audio file (for verify mode)")
+    parser.add_argument("--threshold", type=float, default=0.45,
+                       help="Similarity threshold for match decision")
+
+    args = parser.parse_args()
+
+    if args.mode == "noise_test":
+        if not os.path.exists(args.onnx):
+            print(f"ONNX model not found: {args.onnx}")
+            sys.exit(1)
+        run_noisy_onnx_test(args.onnx, args.pcen)
+        
+    elif args.mode == "eer":
+        if not os.path.exists(args.onnx):
+            print(f"ONNX model not found: {args.onnx}")
+            print("Run train.py first to produce the domain-adapted model.")
+            sys.exit(1)
+
+        verifier = OnnxSpeakerVerifier(
+            onnx_model_path=args.onnx,
+            pcen_params_path=args.pcen,
+        )
+        eer, threshold, report = verifier.run_eer_validation(args.data)
+
+        report_path = os.path.join(os.path.dirname(args.onnx), "eer_validation_report.json")
+        with open(report_path, 'w') as f:
+            json.dump(report, f, indent=2)
+        print(f"Report saved to: {report_path}")
+
+    elif args.mode == "verify":
+        if not args.audio1 or not args.audio2:
+            print("--audio1 and --audio2 are required for verify mode")
+            sys.exit(1)
+
+        verifier = OnnxSpeakerVerifier(
+            onnx_model_path=args.onnx,
+            pcen_params_path=args.pcen,
+        )
+
+        sim, is_match = verifier.verify(args.audio1, args.audio2, threshold=args.threshold)
+
+        print(f"\nCosine Similarity: {sim:.4f}")
+        if is_match:
+            print(f"✅ MATCH (threshold: {args.threshold})")
+        else:
+            print(f"❌ NO MATCH (threshold: {args.threshold})")

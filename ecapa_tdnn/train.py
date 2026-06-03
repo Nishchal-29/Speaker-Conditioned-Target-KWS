@@ -5,6 +5,8 @@ import math
 import json
 import hashlib
 import itertools
+from pathlib import Path
+import glob
 
 # --- BUG FIX FOR WINDOWS / PYTORCH 2.x ---
 os.environ["TORCH_DYNAMO_DISABLE"] = "1"
@@ -22,10 +24,11 @@ import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import numpy as np
 from speechbrain.inference.speaker import EncoderClassifier
 
 torch._dynamo.config.disable = True
-
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 from pcen import LearnablePCEN
 from dataset import DomainAdaptationDataset, BalancedBatchSampler
 from metrics import compute_eer
@@ -34,62 +37,29 @@ class AAMSoftmax(nn.Module):
     """Additive Angular Margin Softmax (ArcFace) loss module."""
 
     def __init__(self, in_features, out_features, s=32.0, m=0.2):
-        """
-        Args:
-            in_features: Embedding dimension (192 for ECAPA-TDNN).
-            out_features: Number of speakers (N_spk).
-            s: Feature scale (hypersphere radius). Spec: 32.
-            m: Additive angular margin in radians. Spec: 0.2.
-        """
         super(AAMSoftmax, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.s = s
         self.m = m
-
-        # Weight matrix: each row is the "center" of a speaker cluster on S^191
-        # Spec Step 3c: Xavier uniform initialisation
         self.weight = nn.Parameter(torch.FloatTensor(out_features, in_features))
         nn.init.xavier_uniform_(self.weight)
-
-        # Pre-calculate trigonometric constants
         self.cos_m = math.cos(m)
         self.sin_m = math.sin(m)
         self.th = math.cos(math.pi - m)
         self.mm = math.sin(math.pi - m) * m
 
     def forward(self, embeddings, labels):
-        """
-        Args:
-            embeddings: [batch, 192] — raw embeddings (will be L2-normalised internally).
-            labels: [batch] — ground-truth speaker IDs.
-
-        Returns:
-            output: [batch, N_spk] — scaled cosine logits with angular margin applied.
-            cosine: [batch, N_spk] — raw cosine similarities (for accuracy computation).
-        """
-        # L2-normalise embeddings and weights (Invariant #3)
         cosine = F.linear(F.normalize(embeddings), F.normalize(self.weight))
-
-        # Safe sine computation (avoid NaN from numerical imprecision)
         sine = torch.sqrt(torch.clamp(1.0 - torch.pow(cosine, 2), min=1e-7))
-
-        # cos(θ + m) = cos(θ)·cos(m) − sin(θ)·sin(m)
         phi = cosine * self.cos_m - sine * self.sin_m
-
-        # Numerical stability: when cosine < cos(π - m), use linear approximation
         phi = torch.where(cosine > self.th, phi, cosine - self.mm)
-
-        # Apply margin only to the ground-truth class
         one_hot = torch.zeros(cosine.size(), device=embeddings.device)
         one_hot.scatter_(1, labels.view(-1, 1).long(), 1)
         output = (one_hot * phi) + ((1.0 - one_hot) * cosine)
-
-        # Scale by hypersphere radius
         output = output * self.s
 
         return output, cosine
-
 
 class ECAPABackbone(nn.Module):
     """
@@ -102,17 +72,7 @@ class ECAPABackbone(nn.Module):
         self.encoder = speechbrain_encoder
 
     def forward(self, pcen_features):
-        """
-        Args:
-            pcen_features: [batch, n_mels, time] from LearnablePCEN
-
-        Returns:
-            embeddings: [batch, 192]
-        """
-        # SpeechBrain encoder expects [batch, time, features]
         features = pcen_features.transpose(1, 2)
-
-        # Utterance-level normalization (mean=0, std=1 across time)
         mean = features.mean(dim=1, keepdim=True)
         std = features.std(dim=1, keepdim=True)
         features = (features - mean) / (std + 1e-5)
@@ -121,7 +81,6 @@ class ECAPABackbone(nn.Module):
         embeddings = embeddings.squeeze(1)
 
         return embeddings
-
 
 class DomainAdaptationTrainer:
     """
@@ -155,12 +114,6 @@ class DomainAdaptationTrainer:
         self.early_stop_patience = early_stop_patience
 
         os.makedirs(output_dir, exist_ok=True)
-
-        # --- Data Setup ---
-        print("=" * 60)
-        print("CONTEXT A — OFFLINE DOMAIN ADAPTATION")
-        print("=" * 60)
-
         print("\n[1/5] Initializing Domain Adaptation Dataset...")
         full_dataset = DomainAdaptationDataset(data_dir=data_dir, max_audio_length=48000)
 
@@ -169,37 +122,17 @@ class DomainAdaptationTrainer:
 
         self.num_classes = full_dataset.n_speakers
         self.spk_to_id = full_dataset.spk_to_id
-
-        # Balanced batch sampler for training
-        self.train_sampler = BalancedBatchSampler(
-            self.train_dataset, batch_size=batch_size
-        )
-        self.train_loader = DataLoader(
-            self.train_dataset,
-            batch_sampler=self.train_sampler,
-            num_workers=4,
-            pin_memory=True,
-        )
-
-        # Standard loader for validation (no balancing needed)
-        self.val_loader = DataLoader(
-            self.val_dataset,
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=2,
-            pin_memory=True,
-        )
+        self.train_sampler = BalancedBatchSampler(self.train_dataset, speakers_per_batch=16, utterances_per_speaker=4)
+        self.train_loader = DataLoader(self.train_dataset, batch_sampler=self.train_sampler, num_workers=4, pin_memory=True)
+        self.val_loader = DataLoader(self.val_dataset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
 
         self._setup_model()
 
     def _setup_model(self):
         """Load pre-trained ECAPA-TDNN backbone, attach learnable PCEN and AAM head."""
 
-        # --- Step 1: Learnable PCEN Frontend ---
         print("\n[2/5] Initializing Learnable PCEN Frontend...")
         self.pcen = LearnablePCEN().to(self.device)
-
-        # --- Step 3: Load pre-trained ECAPA-TDNN ---
         print("[3/5] Loading pre-trained ECAPA-TDNN from SpeechBrain...")
         classifier = EncoderClassifier.from_hparams(
             source="speechbrain/spkrec-ecapa-voxceleb",
@@ -207,12 +140,10 @@ class DomainAdaptationTrainer:
             run_opts={"device": str(self.device)}
         )
 
-        # Extract embedding model (remove original feature extractor + classifier)
         self.backbone = ECAPABackbone(
             classifier.mods.embedding_model.to(self.device)
         )
 
-        # --- Step 3a–3c: Replace classification head ---
         print(f"[4/5] Initializing AAM-Softmax head for {self.num_classes} speakers "
               f"(s=32, m=0.2)...")
         self.classification_head = AAMSoftmax(
@@ -224,7 +155,6 @@ class DomainAdaptationTrainer:
 
         self.criterion = nn.CrossEntropyLoss()
 
-        # --- Step 5: AdamW with dual learning rates ---
         print("[5/5] Configuring AdamW optimizer with dual learning rates...")
         self.optimizer = AdamW([
             {'params': self.pcen.parameters(), 'lr': self.lr_pcen},
@@ -236,8 +166,6 @@ class DomainAdaptationTrainer:
               f"Weight Decay: {self.weight_decay}")
 
     def train(self):
-        """Execute the full Context A training loop with early stopping on val EER."""
-
         print(f"\n{'=' * 60}")
         print(f"Starting Domain Adaptation Fine-Tuning on {self.device}")
         print(f"  Epochs: {self.num_epochs}, Batch: {self.batch_size}, "
@@ -248,18 +176,12 @@ class DomainAdaptationTrainer:
         patience_counter = 0
 
         for epoch in range(self.num_epochs):
-            # --- Training ---
             train_loss, train_acc = self._train_epoch(epoch)
-
-            # --- Validation ---
             val_eer, val_threshold = self._validate_epoch(epoch)
-
-            # --- PCEN parameter tracking ---
             pcen_params = self.pcen.export_params()
             print(f"  PCEN params: s={pcen_params['s']:.4f}, α={pcen_params['alpha']:.4f}, "
                   f"δ={pcen_params['delta']:.4f}, r={pcen_params['r']:.4f}")
 
-            # --- Early stopping ---
             if val_eer < best_eer:
                 best_eer = val_eer
                 patience_counter = 0
@@ -301,8 +223,6 @@ class DomainAdaptationTrainer:
 
             loss = self.criterion(outputs, labels)
             loss.backward()
-
-            # Gradient clipping (Spec Step 5)
             torch.nn.utils.clip_grad_norm_(
                 itertools.chain(
                     self.pcen.parameters(),
@@ -336,8 +256,6 @@ class DomainAdaptationTrainer:
         """Compute validation EER on the held-out speaker split."""
         self.pcen.eval()
         self.backbone.eval()
-
-        # Extract all validation embeddings
         all_embeddings = []
         all_labels = []
 
@@ -345,33 +263,54 @@ class DomainAdaptationTrainer:
             raw_waveforms = raw_waveforms.to(self.device)
             pcen_features = self.pcen(raw_waveforms)
             embeddings = self.backbone(pcen_features)
-
-            # L2-normalise (Invariant #3)
             embeddings = F.normalize(embeddings, p=2, dim=1)
-
             all_embeddings.append(embeddings.cpu())
             all_labels.append(labels)
 
         all_embeddings = torch.cat(all_embeddings, dim=0)
         all_labels = torch.cat(all_labels, dim=0)
 
-        # Generate pairs for EER computation
+        spk_to_indices = {}
+        for idx, label in enumerate(all_labels.numpy()):
+            if label not in spk_to_indices:
+                spk_to_indices[label] = []
+            spk_to_indices[label].append(idx)
+            
+        speakers = list(spk_to_indices.keys())
+
         scores = []
         pair_labels = []
-        n = len(all_embeddings)
+        n_target_pairs = 10000
+        
+        same_pairs = []
+        for spk, indices in spk_to_indices.items():
+            if len(indices) >= 2:
+                for _ in range(200): 
+                    idx1, idx2 = np.random.choice(indices, 2, replace=False)
+                    same_pairs.append((idx1, idx2))
+                    
+        np.random.shuffle(same_pairs)
+        same_pairs = same_pairs[:n_target_pairs]
 
-        # Use all pairs (for small validation sets this is tractable)
-        for i in range(n):
-            for j in range(i + 1, n):
-                sim = F.cosine_similarity(
-                    all_embeddings[i].unsqueeze(0),
-                    all_embeddings[j].unsqueeze(0)
-                ).item()
-                scores.append(sim)
-                pair_labels.append(1 if all_labels[i] == all_labels[j] else 0)
+        diff_pairs = []
+        for _ in range(n_target_pairs):
+            spk1, spk2 = np.random.choice(speakers, 2, replace=False)
+            idx1 = np.random.choice(spk_to_indices[spk1])
+            idx2 = np.random.choice(spk_to_indices[spk2])
+            diff_pairs.append((idx1, idx2))
+
+        for idx1, idx2 in same_pairs:
+            sim = F.cosine_similarity(all_embeddings[idx1].unsqueeze(0), all_embeddings[idx2].unsqueeze(0)).item()
+            scores.append(sim)
+            pair_labels.append(1)
+
+        for idx1, idx2 in diff_pairs:
+            sim = F.cosine_similarity(all_embeddings[idx1].unsqueeze(0), all_embeddings[idx2].unsqueeze(0)).item()
+            scores.append(sim)
+            pair_labels.append(0)
 
         if len(scores) == 0:
-            print(f"  Val — No pairs available for EER computation.")
+            print(f"Val — No pairs available for EER computation.")
             return 1.0, 0.0
 
         eer, threshold = compute_eer(scores, pair_labels)
@@ -397,56 +336,37 @@ class DomainAdaptationTrainer:
             'spk_to_id': self.spk_to_id,
             'pcen_params': self.pcen.export_params(),
         }, checkpoint_path)
-        print(f"  → Checkpoint saved: {checkpoint_path}")
+        print(f"Checkpoint saved: {checkpoint_path}")
 
     def export(self, checkpoint_path=None):
         """
-        Context A, Step 6: Export the trained model for deployment.
-
         Produces:
           1. ONNX backbone (opset 14, dynamic time axis) — no classification head
           2. PCEN parameter JSON sidecar
           3. Validation report (50-pair EER check, must be < 5%)
-
-        Args:
-            checkpoint_path: Path to the best training checkpoint.
-                             If None, uses the latest checkpoint in output_dir.
         """
         print(f"\n{'=' * 60}")
         print("EXPORT — Preparing deployment artifacts")
         print(f"{'=' * 60}\n")
 
-        # Load best checkpoint if specified
         if checkpoint_path is not None:
             print(f"Loading checkpoint: {checkpoint_path}")
             ckpt = torch.load(checkpoint_path, map_location=self.device)
             self.pcen.load_state_dict(ckpt['pcen_state_dict'])
             self.backbone.load_state_dict(ckpt['backbone_state_dict'])
-
-        # --- Step 6a: Strip classification head ---
-        # (We simply don't include it in the export)
-
-        # --- Step 6b: Freeze all backbone weights ---
         print("[1/4] Freezing backbone parameters...")
         self.pcen.eval()
         self.backbone.eval()
         for param in self.backbone.parameters():
             param.requires_grad = False
 
-        # --- Step 6d: Export PCEN parameters as JSON sidecar ---
         pcen_json_path = os.path.join(self.output_dir, "pcen_params.json")
         print(f"[2/4] Exporting PCEN parameters to {pcen_json_path}")
         pcen_params = self.pcen.save_params(pcen_json_path)
         print(f"  s={pcen_params['s']:.6f}, α={pcen_params['alpha']:.6f}, "
               f"δ={pcen_params['delta']:.6f}, r={pcen_params['r']:.6f}")
-
-        # --- Step 6c: Export backbone to ONNX ---
         onnx_path = os.path.join(self.output_dir, "ecapa_backbone.onnx")
         print(f"[3/4] Exporting backbone to ONNX: {onnx_path}")
-
-        # Create a wrapper that only contains the backbone (no PCEN, no head)
-        # Input: PCEN features [batch, n_mels=80, time]
-        # Output: 192-D embedding [batch, 192]
         dummy_input = torch.randn(1, 80, 300).to(self.device)
 
         torch.onnx.export(
@@ -463,15 +383,11 @@ class DomainAdaptationTrainer:
             do_constant_folding=True,
         )
 
-        # Compute ONNX file hash for the enrolled profile
         onnx_hash = self._compute_file_hash(onnx_path)
         print(f"  ONNX hash: {onnx_hash[:16]}...")
-
-        # --- Step 6e: Validate export with 50-pair EER check ---
         print("[4/4] Running 50-pair EER validation...")
         eer = self._validate_export(n_same=25, n_diff=25)
 
-        # Write validation report
         report = {
             "onnx_path": onnx_path,
             "pcen_params_path": pcen_json_path,
@@ -486,10 +402,10 @@ class DomainAdaptationTrainer:
             json.dump(report, f, indent=2)
 
         if eer < 0.05:
-            print(f"\n✅ EXPORT VALIDATED — EER: {eer:.4f} (< 5% threshold)")
+            print(f"\nEXPORT VALIDATED — EER: {eer:.4f} (< 5% threshold)")
         else:
-            print(f"\n⚠️  WARNING — EER: {eer:.4f} (>= 5% threshold)")
-            print("   The model may not meet deployment quality requirements.")
+            print(f"\nWARNING — EER: {eer:.4f} (>= 5% threshold)")
+            print("The model may not meet deployment quality requirements.")
 
         print(f"\nDeployment artifacts saved to: {self.output_dir}/")
         print(f"  - ecapa_backbone.onnx")
@@ -523,30 +439,29 @@ class DomainAdaptationTrainer:
         all_embeddings = torch.cat(all_embeddings, dim=0)
         all_labels = torch.cat(all_labels, dim=0)
 
-        # Generate same-speaker and different-speaker pairs
+        spk_to_indices = {}
+        for idx, label in enumerate(all_labels.numpy()):
+            if label not in spk_to_indices:
+                spk_to_indices[label] = []
+            spk_to_indices[label].append(idx)
+            
+        speakers = list(spk_to_indices.keys())
+
         same_pairs = []
         diff_pairs = []
+        
+        valid_same_spks = [spk for spk, idxs in spk_to_indices.items() if len(idxs) >= 2]
+        for _ in range(n_same):
+            spk = np.random.choice(valid_same_spks)
+            idx1, idx2 = np.random.choice(spk_to_indices[spk], 2, replace=False)
+            same_pairs.append((idx1, idx2))
 
-        n = len(all_embeddings)
-        for i in range(n):
-            for j in range(i + 1, n):
-                if all_labels[i] == all_labels[j]:
-                    same_pairs.append((i, j))
-                else:
-                    diff_pairs.append((i, j))
+        for _ in range(n_diff):
+            spk1, spk2 = np.random.choice(speakers, 2, replace=False)
+            idx1 = np.random.choice(spk_to_indices[spk1])
+            idx2 = np.random.choice(spk_to_indices[spk2])
+            diff_pairs.append((idx1, idx2))
 
-        # Sample exactly n_same and n_diff pairs
-        rng = torch.Generator()
-        rng.manual_seed(42)
-
-        if len(same_pairs) > n_same:
-            indices = torch.randperm(len(same_pairs), generator=rng)[:n_same]
-            same_pairs = [same_pairs[i] for i in indices]
-        if len(diff_pairs) > n_diff:
-            indices = torch.randperm(len(diff_pairs), generator=rng)[:n_diff]
-            diff_pairs = [diff_pairs[i] for i in indices]
-
-        # Compute similarities
         scores = []
         labels = []
 
@@ -582,29 +497,26 @@ class DomainAdaptationTrainer:
         return sha256.hexdigest()
 
 if __name__ == "__main__":
-    DATASET_DIR = "./data/LibriSpeech/dev-clean"
+    DATASET_DIR = "../data/VoxCeleb1/wav"
 
     trainer = DomainAdaptationTrainer(
         data_dir=DATASET_DIR,
         output_dir="./finetuned_models",
         num_epochs=10,
         batch_size=64,
-        lr_backbone=1e-4, # changed
+        lr_backbone=1e-5, 
         lr_pcen=1e-4,
         weight_decay=1e-4,
         max_grad_norm=1.0,
         val_split_ratio=0.1,
         val_split_seed=42,
-        early_stop_patience=5, # changed
+        early_stop_patience=5, 
     )
 
     best_eer = trainer.train()
-
-    # Find best checkpoint for export
-    import glob
     checkpoints = sorted(glob.glob(os.path.join(trainer.output_dir, "domain_adapted_epoch_*.pth")))
     if checkpoints:
-        best_ckpt = checkpoints[-1]  # Last saved = best (only saved on improvement)
+        best_ckpt = checkpoints[-1]  
         report = trainer.export(checkpoint_path=best_ckpt)
     else:
         print("No checkpoints found. Exporting current model state...")

@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+
+# Datasets
+data/
+noise_dataset/
+
+# Model checkpoints
+finetuned_models/
+ecapa_tdnn/finetuned_models/
+
+# Outputs
+tc_resnet/
+eer_validation_report.json
+
+dataset_test.py
+pcen_test.py
+train_test.py
+verify_test.py

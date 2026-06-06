@@ -1,7 +1,7 @@
 import urllib.request
 import random
 
-def build_master_wordlist(target_count=30000, min_len=3, max_len=12, output_file="master_words.txt"):
+def build_master_wordlist(target_count=3000, min_len=3, max_len=12, output_file="master_words.txt"):
     url = "https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt"    
     response = urllib.request.urlopen(url)
     raw_words = response.read().decode('utf-8').splitlines()    
@@ -21,4 +21,4 @@ def build_master_wordlist(target_count=30000, min_len=3, max_len=12, output_file
     print(f"Successfully wrote {len(final_words):,} words to {output_file}")
 
 if __name__ == "__main__":
-    build_master_wordlist(target_count=30000)
+    build_master_wordlist(target_count=3000)

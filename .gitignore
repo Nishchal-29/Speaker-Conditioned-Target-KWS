@@ -11,7 +11,7 @@ finetuned_models/
 ecapa_tdnn/finetuned_models/
 
 # Outputs
-tc_resnet/
+# tc_resnet/
 eer_validation_report.json
 
 dataset_test.py

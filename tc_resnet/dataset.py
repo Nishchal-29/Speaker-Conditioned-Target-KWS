@@ -8,6 +8,8 @@ import torch
 import librosa
 from torch.utils.data import Dataset
 from g2p_en import G2p
+from collections import defaultdict
+from torch.utils.data.sampler import Sampler
 
 SAMPLE_RATE = 16000
 TARGET_LENGTH = 24000 
@@ -15,7 +17,6 @@ HARD_NEG_FRAC = 0.50
 N_MELS = 80
 
 def compute_ped_matrix(words, cache_path=None):
-    """Compute normalised Phoneme Edit Distance (PED) between all word pairs using difflib."""
     if cache_path and os.path.exists(cache_path):
         print(f"[PED] Loading cached phoneme data from {cache_path}")
         with open(cache_path, 'r') as f:
@@ -23,8 +24,6 @@ def compute_ped_matrix(words, cache_path=None):
         return cached['phoneme_seqs'], cached['hard_neg_pool']
 
     g2p = G2p()
-    print(f"[PED] Computing phoneme sequences for {len(words)} words...")
-
     phoneme_seqs = {}
     for w in words:
         raw = g2p(w)
@@ -33,7 +32,6 @@ def compute_ped_matrix(words, cache_path=None):
 
     print(f"[PED] Computing pairwise PED for {len(words)} words...")
     hard_neg_pool = {w: [] for w in words}
-
     for i, w1 in enumerate(words):
         p1 = phoneme_seqs[w1]
         candidates = []
@@ -47,7 +45,7 @@ def compute_ped_matrix(words, cache_path=None):
                 continue
 
             sm = difflib.SequenceMatcher(None, p1, p2)
-            ped = 1.0 - sm.ratio() # distance = 1 - similarity
+            ped = 1.0 - sm.ratio() 
 
             if ped < 0.35:
                 candidates.append((w2, ped))
@@ -66,18 +64,59 @@ def compute_ped_matrix(words, cache_path=None):
 
     return phoneme_seqs, hard_neg_pool
 
+class PhoneticContrastiveSampler(Sampler):
+    def __init__(self, dataset, m_per_class=4, batch_size=64):
+        self.dataset = dataset
+        self.m_per_class = m_per_class
+        self.batch_size = batch_size
+        self.classes_per_batch = batch_size // m_per_class
+        self.word_to_id = {word: idx for idx, word in enumerate(dataset.words)}
+        self.id_to_word = {idx: word for word, idx in self.word_to_id.items()}
+        self.class_to_indices = defaultdict(list)
+        for idx, (word, _) in enumerate(dataset.all_entries):
+            label = self.word_to_id[word]
+            self.class_to_indices[label].append(idx)
 
-class TripletDataset(Dataset):
-    def __init__(self, data_root, musan_dir="../data/musan", sample_rate=SAMPLE_RATE, target_length=TARGET_LENGTH, val_words_path=None):
+        self.hard_neg_pool = dataset.hard_neg_pool
+        self.all_classes = list(self.class_to_indices.keys())
+        self.num_batches = len(dataset.all_entries) // batch_size
+
+    def __iter__(self):
+        for _ in range(self.num_batches):
+            anchor_class = random.choice(self.all_classes)
+            anchor_word = self.id_to_word[anchor_class]
+            hard_neg_words = self.hard_neg_pool.get(anchor_word, [])
+            hard_neg_classes = [self.word_to_id[w] for w in hard_neg_words if w in self.word_to_id]
+            selected_classes = [anchor_class]
+            n_hard_negs = (self.classes_per_batch // 2) - 1
+            if len(hard_neg_classes) >= n_hard_negs:
+                selected_classes.extend(random.sample(hard_neg_classes, n_hard_negs))
+            else:
+                selected_classes.extend(hard_neg_classes)
+
+            while len(selected_classes) < self.classes_per_batch:
+                rand_class = random.choice(self.all_classes)
+                if rand_class not in selected_classes:
+                    selected_classes.append(rand_class)
+
+            batch_indices = []
+            for cls in selected_classes:
+                indices = self.class_to_indices[cls]
+                if len(indices) >= self.m_per_class:
+                    batch_indices.extend(random.sample(indices, self.m_per_class))
+                else:
+                    batch_indices.extend(random.choices(indices, k=self.m_per_class))
+
+            random.shuffle(batch_indices)            
+            yield batch_indices
+
+    def __len__(self):
+        return self.num_batches
+
+class SupConDataset(Dataset):
+    def __init__(self, data_root, musan_dir="../data/musan", sample_rate=SAMPLE_RATE, target_length=TARGET_LENGTH):
         self.sr = sample_rate
         self.target_length = target_length
-
-        val_words = set()
-        if val_words_path and os.path.exists(val_words_path):
-            with open(val_words_path, 'r') as f:
-                val_words = set(line.strip().lower() for line in f if line.strip())
-            print(f"[TripletDataset] Excluding {len(val_words)} validation words")
-
         self.word_files = {}
         if not os.path.isdir(data_root):
             raise ValueError(f"Data root not found: {data_root}")
@@ -88,20 +127,16 @@ class TripletDataset(Dataset):
                 continue
 
             word = word_dir.lower().strip()
-
-            # Exclude validation words
-            if word in val_words:
-                continue
-
             files = sorted(glob.glob(os.path.join(word_path, "*.wav")))
-            if len(files) >= 2:  # Need at least 2 files per word for anchor + positive
+            if len(files) >= 2:  
                 self.word_files[word] = files
 
         self.words = sorted(self.word_files.keys())
         if len(self.words) == 0:
             raise ValueError(f"No valid word directories found in {data_root}")
 
-        self.all_entries = []  # list of (word, file_idx_within_word)
+        self.word_to_id = {word: idx for idx, word in enumerate(self.words)}
+        self.all_entries = [] 
         for word in self.words:
             for i in range(len(self.word_files[word])):
                 self.all_entries.append((word, i))
@@ -146,36 +181,14 @@ class TripletDataset(Dataset):
         return len(self.all_entries)
 
     def __getitem__(self, idx):
-        """Returns (anchor, positive, negative) triplet"""
-        anchor_word, anchor_file_idx = self.all_entries[idx]
-        triplet_type_idx = idx % 10
+        word, file_idx = self.all_entries[idx]
+        audio_path = self.word_files[word][file_idx]        
+        label = self.word_to_id[word]
+        wav = self._load_audio(audio_path)
+        snr_lo, snr_hi = -5.0, 15.0
+        wav = self._inject_musan(wav, snr_lo, snr_hi)
 
-        anchor_path = self.word_files[anchor_word][anchor_file_idx]
-        anchor_wav = self._load_audio(anchor_path)
-
-        pos_files = self.word_files[anchor_word]
-        pos_candidates = [i for i in range(len(pos_files)) if i != anchor_file_idx]
-        if not pos_candidates:
-            pos_candidates = list(range(len(pos_files)))
-        pos_idx = random.choice(pos_candidates)
-        pos_wav = self._load_audio(pos_files[pos_idx])
-
-        if triplet_type_idx < 3:
-            neg_word = self._sample_easy_negative(anchor_word)
-            snr_lo, snr_hi = 5.0, 20.0
-        elif triplet_type_idx < 8:
-            neg_word = self._sample_hard_negative(anchor_word)
-            snr_lo, snr_hi = -5.0, 15.0
-        else:
-            neg_word = self._sample_hard_negative(anchor_word)
-            snr_lo, snr_hi = -5.0, -5.0
-
-        neg_files = self.word_files[neg_word]
-        neg_wav = self._load_audio(random.choice(neg_files))
-        pos_wav = self._inject_musan(pos_wav, snr_lo, snr_hi)
-        neg_wav = self._inject_musan(neg_wav, snr_lo, snr_hi)
-
-        return anchor_wav, pos_wav, neg_wav
+        return wav, torch.tensor(label, dtype=torch.long)
 
     def _load_audio(self, path):
         try:
@@ -201,64 +214,35 @@ class TripletDataset(Dataset):
 
         wav_np = waveform.numpy()
         snr_db = random.uniform(snr_lo, snr_hi)
-
-        # 1. Load a random MUSAN file
         noise_path = random.choice(self.musan_files)
         try:
-            # Fast load without resampling if possible, but librosa handles it safely
             noise, _ = librosa.load(noise_path, sr=self.sr, mono=True)
         except Exception:
             return waveform
 
-        # 2. Slice exactly 1.5 seconds of noise (or wrap-pad if too short)
         if len(noise) > self.target_length:
             start = random.randint(0, len(noise) - self.target_length)
             noise = noise[start:start + self.target_length]
         else:
-            # Wrap padding loops the noise naturally if it's shorter than 1.5s
             noise = np.pad(noise, (0, self.target_length - len(noise)), mode='wrap')
 
-        # 3. Calculate RMS and mix based on target SNR
         speech_rms = np.sqrt(np.mean(wav_np ** 2))
         if speech_rms < 1e-10:
             return waveform
-
         noise_rms = np.sqrt(np.mean(noise ** 2))
         if noise_rms < 1e-10:
             return waveform
 
         noise_rms_target = speech_rms / (10 ** (snr_db / 20))
         noisy = wav_np + noise * (noise_rms_target / noise_rms)
-
-        # 4. Prevent clipping saturation
         peak = np.abs(noisy).max()
         if peak > 1e-6:
             noisy = np.clip(noisy / peak, -1.0, 1.0)
 
         return torch.FloatTensor(noisy)
 
-    def _sample_hard_negative(self, anchor_word):
-        """Sample a word from the hard negative pool (PED < 0.35)."""
-        pool = self.hard_neg_pool.get(anchor_word, [])
-        valid = [w for w in pool if w in self.word_files]
-        if valid:
-            return random.choice(valid)
-        candidates = [w for w in self.words if w != anchor_word]
-        return random.choice(candidates) if candidates else anchor_word
-
-    def _sample_easy_negative(self, anchor_word):
-        """Sample a random word with PED > 0.60."""
-        pool = self.easy_neg_pool.get(anchor_word, [])
-        valid = [w for w in pool if w in self.word_files]
-        if valid:
-            return random.choice(valid)
-        candidates = [w for w in self.words if w != anchor_word]
-        return random.choice(candidates) if candidates else anchor_word
-
-
 class ValidationDataset:
-    def __init__(self, data_root, val_words_path=None, sample_rate=SAMPLE_RATE,
-                 target_length=TARGET_LENGTH, k_enroll=3, n_test=5):
+    def __init__(self, data_root, sample_rate=SAMPLE_RATE, target_length=TARGET_LENGTH, k_enroll=3, n_test=5):
         self.sr = sample_rate
         self.target_length = target_length
         self.k_enroll = k_enroll
@@ -284,7 +268,6 @@ class ValidationDataset:
         return enroll, test
 
     def load_audio(self, path):
-        """Load and preprocess a single audio file."""
         wav, _ = librosa.load(path, sr=self.sr, mono=True)
         if len(wav) < self.target_length:
             wav = np.pad(wav, (0, self.target_length - len(wav)), mode='constant')

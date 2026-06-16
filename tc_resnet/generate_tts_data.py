@@ -52,7 +52,7 @@ async def generate_tts(text, voice, output_path, retries=3):
         try:
             communicate = edge_tts.Communicate(text, voice, rate="+0%")
             await asyncio.wait_for(communicate.save(mp3_path), timeout=15.0)
-            
+
             if os.path.exists(mp3_path) and os.path.getsize(mp3_path) > 0:
                 audio, sr = await asyncio.to_thread(librosa.load, mp3_path, sr=16000, mono=True)
                 audio = enforce_length(audio, TARGET_SAMPLES)

@@ -18,7 +18,7 @@ N_MELS = 80
 
 def compute_ped_matrix(words, cache_path=None):
     if cache_path and os.path.exists(cache_path):
-        print(f"[PED] Loading cached phoneme data from {cache_path}")
+        print(f"Loading cached phoneme data from {cache_path}")
         with open(cache_path, 'r') as f:
             cached = json.load(f)
         return cached['phoneme_seqs'], cached['hard_neg_pool']
@@ -30,7 +30,7 @@ def compute_ped_matrix(words, cache_path=None):
         phonemes = [p for p in raw if p.strip() and p.isalpha()]
         phoneme_seqs[w] = phonemes
 
-    print(f"[PED] Computing pairwise PED for {len(words)} words...")
+    print(f"Computing pairwise PED for {len(words)} words...")
     hard_neg_pool = {w: [] for w in words}
     for i, w1 in enumerate(words):
         p1 = phoneme_seqs[w1]
@@ -60,7 +60,7 @@ def compute_ped_matrix(words, cache_path=None):
                 'phoneme_seqs': phoneme_seqs,
                 'hard_neg_pool': hard_neg_pool,
             }, f)
-        print(f"[PED] Cached to {cache_path}")
+        print(f"Cached to {cache_path}")
 
     return phoneme_seqs, hard_neg_pool
 
@@ -165,17 +165,17 @@ class SupConDataset(Dataset):
         if musan_dir and os.path.exists(musan_dir):
             for category in ['noise', 'speech', 'music']:
                 self.musan_files.extend(glob.glob(os.path.join(musan_dir, category, "**/*.wav"), recursive=True))
-            print(f"[TripletDataset] Loaded {len(self.musan_files)} real MUSAN tracks for background noise.")
+            print(f"Loaded {len(self.musan_files)} real MUSAN tracks for background noise.")
         else:
-            print(f"[TripletDataset] WARNING: MUSAN dir not found at {musan_dir}. Audio will be clean.")
+            print(f"WARNING: MUSAN dir not found at {musan_dir}. Audio will be clean.")
 
         n_utts = sum(len(f) for f in self.word_files.values())
         avg_hard = np.mean([len(self.hard_neg_pool.get(w, [])) for w in self.words])
-        print(f"\n[TripletDataset] Corpus statistics:")
-        print(f"  Words: {len(self.words)}")
-        print(f"  Utterances: {n_utts}")
-        print(f"  Avg hard negatives/word: {avg_hard:.1f}")
-        print(f"  Avg files/word: {n_utts / max(len(self.words), 1):.1f}")
+        print(f"\nCorpus statistics:")
+        print(f"Words: {len(self.words)}")
+        print(f"Utterances: {n_utts}")
+        print(f"Avg hard negatives/word: {avg_hard:.1f}")
+        print(f"Avg files/word: {n_utts / max(len(self.words), 1):.1f}")
 
     def __len__(self):
         return len(self.all_entries)
@@ -261,10 +261,51 @@ class ValidationDataset:
               f"(need ≥ {k_enroll + n_test})")
 
     def get_enrollment_and_test(self, word):
-        files = self.word_files[word]
-        random.shuffle(files)
-        enroll = files[:self.k_enroll]
-        test = files[self.k_enroll:self.k_enroll + self.n_test]
+        speaker_dict = {}
+        for path in self.word_files[word]:
+            filename = os.path.basename(path)
+            spk_id = filename.split("_")[0]
+            speaker_dict.setdefault(spk_id, []).append(path)
+
+        speakers = list(speaker_dict.keys())
+        random.shuffle(speakers)
+        if len(speakers) >= 2:
+            n_enroll_speakers = min(3, max(1, len(speakers) // 4))
+            enroll_speakers = speakers[:n_enroll_speakers]
+            test_speakers = speakers[n_enroll_speakers:]
+            enroll_files = []
+            test_files = []
+            per_spk = max(1, self.k_enroll // len(enroll_speakers))
+            for spk in enroll_speakers:
+                files = speaker_dict[spk].copy()
+                random.shuffle(files)
+                enroll_files.extend(files[:per_spk])
+
+            remaining = []
+            for spk in enroll_speakers:
+                remaining.extend(speaker_dict[spk])
+
+            random.shuffle(remaining)
+            enroll_files = enroll_files[:self.k_enroll]
+            available_remaining = list(set(remaining) - set(enroll_files))
+            random.shuffle(available_remaining)
+            needed = self.k_enroll - len(enroll_files)
+            if needed > 0 and available_remaining:
+                enroll_files.extend(available_remaining[:needed])
+
+            for spk in test_speakers:
+                test_files.extend(speaker_dict[spk])
+
+            random.shuffle(test_files)
+            test_files = test_files[:self.n_test]
+            if len(enroll_files) >= self.k_enroll and len(test_files) >= self.n_test:
+                return enroll_files, test_files
+
+        all_files = self.word_files[word].copy()
+        random.shuffle(all_files)
+        enroll = all_files[:self.k_enroll]
+        test = all_files[self.k_enroll:self.k_enroll + self.n_test]
+
         return enroll, test
 
     def load_audio(self, path):

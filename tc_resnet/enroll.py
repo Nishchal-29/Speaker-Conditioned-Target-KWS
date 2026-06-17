@@ -135,30 +135,22 @@ def verify_against_template(audio_path, profile_path, pcen, tc_resnet, device, t
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Enroll a custom wake word (Master Word Template generation)")
     parser.add_argument("--audio_files", nargs="+", required=True, help="K=3 enrollment utterance file paths")
-    parser.add_argument("--pcen_params", type=str, required=True, help="Path to pcen_params.json")
-    parser.add_argument("--model_path", type=str, required=True, help="Path to best_checkpoint.pth")
-    parser.add_argument("--output", type=str, default="enrolled_template.json", help="Output path for enrolled profile JSON")
     parser.add_argument("--verify", type=str, default=None, help="Optional: path to test utterance for verification")
-    parser.add_argument("--threshold", type=float, default=0.70, help="Verification similarity threshold")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if len(args.audio_files) < K_ENROLLMENT:
-        print(f"Need at least {K_ENROLLMENT} enrollment utterances")
-        sys.exit(1)
-
-    pcen, tc_resnet, pcen_params, backbone_hash = load_models(args.pcen_params, args.model_path, device)
+    pcen, tc_resnet, pcen_params, backbone_hash = load_models("tc_resnet_output/pcen_params.json", "tc_resnet_output/best_checkpoint.pth", device)
     try:
         w_c, coherence = generate_word_template(args.audio_files, pcen, tc_resnet, device)
     except ValueError as e:
         print(f"\n{e}")
         sys.exit(1)
 
-    profile = save_enrolled_profile(w_c, coherence, pcen_params, backbone_hash, args.output, len(args.audio_files))
+    profile = save_enrolled_profile(w_c, coherence, pcen_params, backbone_hash, "enrolled_template.json", len(args.audio_files))
     if args.verify:
-        sim, match = verify_against_template(args.verify, args.output, pcen, tc_resnet, device, threshold=args.threshold)
+        sim, match = verify_against_template(args.verify, "enrolled_template.json", pcen, tc_resnet, device, threshold=0.7)
         print(f"Cosine similarity: {sim:.4f}")
         if match:
-            print(f"MATCH (threshold: {args.threshold})")
+            print(f"MATCH)")
         else:
-            print(f"NO MATCH (threshold: {args.threshold})")
+            print(f"NO MATCH")

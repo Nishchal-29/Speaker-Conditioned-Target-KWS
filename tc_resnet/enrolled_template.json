@@ -1,0 +1,15 @@
+{
+  "word_template": "tn2hPOdiRj1BNf86t7f1vNtlhL3GX4i918PMPXLB07tAb4698NBYvfMgkr2jI5M++UwTvqgBmLxcUts8puREPbVQHjv2Djc9FgzYutCapj7mHNu90KGUvec8pD3EW4S9Bx1tPX1tUjsTFtY8/JsDPpx38jtc6SM7spTEvSaf073x20E9xGUzvi19j7ucqZI8XRsMvbjYVr2XX3u9D5yLvTpf/LyJTl67Bn1qvbnKsz0NSg08XI28vfZnRjuNyja9DeAEPs7jtbwr2Z68RWcyPL1FN77KVpe9crBWvVL4hTwd7MK86cO6PP0cUb6StXk9r9BBPRjLO73FZnm9Vl2QvJvFRzyZ3w6++fJ5vdS4or3yHSc9xJYZvvsg+L2W5JO8SiCKPeFfLDxPiZa8af6nPZjZnD2jeS+9CAV6vWopzzwqxJo9NlZTu1jUgj1C8Je86J8sPhrAerxPoV+9r3QvvZhYKz0eDsU8cLIRvL91VTy2MeY9ILSaPdXImT0wHge+WFojPcQKaj3nNLU9oA7ZPKRmej1MlFC9Uylpvedzp7zqC488cX5bPB1wnb2gRiA9hhjuvE/6PD1/woc9FstAPBxRHz3NU0k9vfvRvURz4b2/iVm9IRvrPAyfLj0M9I49uWkqPlYi7LoiZOm+Z0BNO5xeij0mB/m8NLKGPXw3Hjw=",
+  "embedding_dim": 128,
+  "enrollment_coherence": 0.8911612033843994,
+  "n_utterances_accepted": 3,
+  "pcen_params": {
+    "s": 0.005358200985938311,
+    "alpha": 0.16507303714752197,
+    "delta": 1.0023728513885999e-09,
+    "r": 0.19364482164382935
+  },
+  "backbone_version": "b01b2d6bcd6223e496e8cf80812d78ac8f3a2c58ecd1606af6e1a18bd5102cff",
+  "enrolled_at": "2026-06-17T06:51:59.430836+00:00",
+  "pipeline": "tc-resnet-path-b"
+}

@@ -16,7 +16,18 @@
 - **Source Code** - Create a **src** folder and add all developed project source codes (including training & benchmark evaluation codes) in the repo. The code must be capable of being successfully installed/executed and must run consistently on the intended platforms.
 - **Models Used** - *(Hugging Face links to all models used in the project. You are permitted to use only open weight models.)*
 - **Models Published** - *(In case you have developed a model as a part of your solution, kindly upload it on Hugging Face under appropriate open source license and add the link here.)*
-- **Datasets Used** - *(Links to all datasets used in the project. You are permitted to use publicly available datasets under licenses like Creative Commons, Open Data Commons, or equivalent.)*
+## Datasets Used
+
+### 1. VoxCeleb1 & VoxCeleb2
+- **Source:** https://www.robots.ox.ac.uk/~vgg/data/voxceleb/
+- **Description:** VoxCeleb is a large-scale audio-visual speaker recognition dataset collected from real-world YouTube videos. It contains over one million utterances from thousands of speakers recorded under diverse acoustic conditions, including background chatter, overlapping speech, room reverberation, and varying recording devices. The dataset is widely used for speaker verification, speaker identification, and speaker embedding research. :contentReference[oaicite:0]{index=0}
+- **Usage in Project:** Used as the primary dataset for training and evaluating speaker verification models.
+
+### 2. MUSAN (Music, Speech, and Noise Corpus)
+- **Source:** https://www.openslr.org/17/
+- **Description:** MUSAN is a corpus containing music, speech, and a diverse collection of technical and non-technical noise recordings. It was specifically designed for tasks such as voice activity detection, speech/music discrimination, and robustness enhancement through noise augmentation. :contentReference[oaicite:1]{index=1}
+- **Usage in Project:** Used for real noise injection and data augmentation to improve model robustness against noisy real-world environments.
+
 ## Datasets Published
 
 ### TTS Corpus Dataset

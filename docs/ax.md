@@ -8,13 +8,13 @@ This project solves speaker-conditioned custom keyword spotting in noisy environ
 Our final system is built from three main parts:
 
 1. **ECAPA-TDNN speaker encoder**  
-   Fine-tuned using a **PCEN frontend** on **VoxCeleb** with **MUSAN noise injection** and **AAM-Softmax** loss.
+   Fine-tuned with a **PCEN frontend** on **VoxCeleb** using **MUSAN noise injection** and **AAM-Softmax** loss.
 
 2. **TC-ResNet keyword encoder**  
    Trained **from scratch** on our custom **`tts_corpus`** dataset, with additional real-life noise augmentation using **MUSAN**.
 
 3. **FiLM + Neural Comparator**  
-   Trained on a specially designed **quad-state dataset** containing all four combinations of target speaker and target word cases.
+   Trained on a specially designed **quad-state dataset** containing all four meaningful speaker/word combinations.
 
 The key idea is simple: first learn **who** is speaking, then learn **what** is being spoken, and finally combine both through a speaker-conditioned decision module.
 
@@ -72,7 +72,7 @@ PCEN behaves like a trainable dynamic compression and normalization step. It red
 Let $E(t,f)$ be the input time-frequency energy at time $t$ and frequency bin $f$. The smoothed background estimate is:
 
 $$
-M(t,f) = (1 - s) M(t-1,f) + s E(t,f)
+M(t,f) = (1 - s)M(t-1,f) + sE(t,f)
 $$
 
 The PCEN output is:
@@ -82,9 +82,11 @@ $$
 =
 \left(
 \frac{E(t,f)}{(\epsilon + M(t,f))^\alpha}
-+ \delta
++
+\delta
 \right)^r
-- \delta^r
+-
+\delta^r
 $$
 
 where:
@@ -235,9 +237,9 @@ L_{\text{triplet}}
 =
 \max\left(
 0,\,
-\|f(A) - f(P)\|_2^2
+\lVert f(A) - f(P) \rVert_2^2
 -
-\|f(A) - f(N)\|_2^2
+\lVert f(A) - f(N) \rVert_2^2
 +
 \alpha
 \right)
@@ -277,7 +279,7 @@ This was one of the most important parts of the project because it directly teac
 Each training example belongs to one of these cases:
 
 | Case | Speaker | Word | Label |
-|---|---|---|---|
+|------|---------|------|-------|
 | True speaker, true word | Target speaker | Target keyword | Positive |
 | False speaker, true word | Wrong speaker | Target keyword | Negative |
 | True speaker, false word | Target speaker | Wrong keyword | Negative |
@@ -327,15 +329,7 @@ A useful comparison tensor is:
 $$
 V_{\text{comp}}
 =
-\left[
-w_c
-\;\Vert\;
-w_{\text{live}}
-\;\Vert\;
-(w_c - w_{\text{live}})
-\;\Vert\;
-(w_c \odot w_{\text{live}})
-\right]
+[w_c \,\|\, w_{\text{live}} \,\|\, (w_c - w_{\text{live}}) \,\|\, (w_c \odot w_{\text{live}})]
 $$
 
 The final output probability is:
@@ -344,7 +338,7 @@ $$
 P_{\text{match}}
 =
 \sigma\left(
-W_2 \cdot \mathrm{ReLU}(W_1 V_{\text{comp}} + b_1) + b_2
+W_2 \cdot \mathrm{ReLU}(W_1V_{\text{comp}} + b_1) + b_2
 \right)
 $$
 
@@ -369,7 +363,7 @@ What worked:
 What did not work as well:
 
 - Training only on positive samples caused overfitting.
-- Training without the false-speaker / false-word cases made the decision boundary too weak.
+- Training without the false-speaker and false-word cases made the decision boundary too weak.
 - A static similarity threshold was not enough for robust noisy speech.
 
 ---
@@ -393,12 +387,12 @@ This staged process was useful because each module could learn its own role befo
 
 ## 8. High-level summary of the final architecture
 
-- PCEN frontend gives noise-robust acoustic normalization.
-- ECAPA-TDNN learns a strong speaker embedding.
-- TC-ResNet learns a keyword embedding from custom training data.
-- FiLM injects speaker identity into the keyword pathway.
-- Neural Comparator makes the final accept/reject decision.
-- Quad-state training makes the decision boundary explicit and reliable.
+- **PCEN frontend** gives noise-robust acoustic normalization.
+- **ECAPA-TDNN** learns a strong speaker embedding.
+- **TC-ResNet** learns a keyword embedding from custom training data.
+- **FiLM** injects speaker identity into the keyword pathway.
+- **Neural Comparator** makes the final accept/reject decision.
+- **Quad-state training** makes the decision boundary explicit and reliable.
 
 ---
 
@@ -414,8 +408,6 @@ The final system worked because:
 - and noise augmentation was used throughout.
 
 That combination is what made the architecture practical for speaker-conditioned keyword spotting.
-
----
 
 ## 10. Datasets used
 

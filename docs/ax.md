@@ -167,6 +167,42 @@ For this branch, we used:
 ### Why training from scratch made sense here
 The keyword vocabulary was custom and not limited to a standard benchmark list. Training from scratch on our own corpus let the model learn exactly the word patterns we cared about, rather than adapting from a mismatched pretraining task.
 
+### TC-ResNet block diagram from our code
+
+The implementation below is the cleanest way to understand the keyword branch:
+
+```mermaid
+flowchart TD
+    A[Raw audio] --> B[Learnable PCEN]
+    B --> C[PCEN features]
+    C --> D[SpecAugment<br/>FrequencyMask + TimeMask]
+    D --> E[Conv1d 80 -> 32<br/>kernel 9, padding 4]
+    E --> F[BatchNorm + ReLU]
+    F --> G[TCResNetBlock 1<br/>32 -> 48, stride 2, dilation 1]
+    G --> H[TCResNetBlock 2<br/>48 -> 64, stride 2, dilation 2]
+    H --> I[TCResNetBlock 3<br/>64 -> 96, stride 2, dilation 4]
+    I --> J[AdaptiveAvgPool1d(1)]
+    J --> K[Linear 96 -> 128]
+    K --> L[L2 normalization]
+    L --> M[128-D keyword embedding]
+```
+
+### How each block maps to the code
+
+- **Learnable PCEN**: turns raw audio into robust PCEN features before the neural network sees them.
+- **SpecAugment**: randomly masks frequency bands and time spans during training so the encoder does not memorize brittle patterns.
+- **Initial Conv1d**: converts the 80-channel acoustic input into a 32-channel feature map.
+- **TCResNetBlock 1**: expands representation from 32 to 48 channels while reducing time resolution.
+- **TCResNetBlock 2**: increases the channels to 64 and uses a larger dilation to widen the receptive field.
+- **TCResNetBlock 3**: produces the final 96-channel temporal representation.
+- **Adaptive average pooling**: compresses the time dimension into one embedding vector.
+- **Linear layer**: maps the 96-D pooled vector to the final 128-D embedding.
+- **L2 normalization**: makes the output embedding stable for comparison and downstream matching.
+
+### What this design achieves
+
+This block structure is small, efficient, and easy to train. It keeps the network focused on acoustic patterns that matter for the custom word while still being compact enough for a practical keyword spotting system.
+
 ---
 
 ## 8. Noise Augmentation with MUSAN

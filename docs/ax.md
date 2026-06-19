@@ -14,7 +14,7 @@ Our final system is built from three main parts:
    Trained **from scratch** on our custom **`tts_corpus`** dataset, with additional real-life noise augmentation using **MUSAN**.
 
 3. **FiLM + Neural Comparator**  
-   Trained on a specially designed **quad-state dataset** containing all four combinations of target/speaker and target/word cases.
+   Trained on a specially designed **quad-state dataset** containing all four combinations of target speaker and target word cases.
 
 The key idea is simple: first learn **who** is speaking, then learn **what** is being spoken, and finally combine both through a speaker-conditioned decision module.
 
@@ -69,18 +69,19 @@ PCEN behaves like a trainable dynamic compression and normalization step. It red
 
 ### 4.2 PCEN formulation
 
-Let $E(t, f)$ be the input time-frequency energy at time $t$ and frequency bin $f$. The smoothed background estimate is:
+Let $E(t,f)$ be the input time-frequency energy at time $t$ and frequency bin $f$. The smoothed background estimate is:
 
 $$
-M(t, f) = (1 - s) M(t - 1, f) + sE(t, f)
+M(t,f) = (1 - s) M(t-1,f) + s E(t,f)
 $$
 
 The PCEN output is:
 
 $$
-\mathrm{PCEN}(t, f) =
+\mathrm{PCEN}(t,f)
+=
 \left(
-\frac{E(t, f)}{(\epsilon + M(t, f))^\alpha}
+\frac{E(t,f)}{(\epsilon + M(t,f))^\alpha}
 + \delta
 \right)^r
 - \delta^r
@@ -89,7 +90,7 @@ $$
 where:
 
 - $\epsilon$ is a small stabilizing constant
-- $M(t, f)$ is the smoothed local energy estimate
+- $M(t,f)$ is the smoothed local energy estimate
 - $\alpha$ controls noise suppression strength
 - $\delta$ controls the offset
 - $r$ controls compression
@@ -111,7 +112,10 @@ The training objective was **Additive Angular Margin Softmax (AAM-Softmax)**.
 For a sample $i$ with ground-truth class $y_i$, AAM-Softmax is:
 
 $$
-L_{\text{AAM}} = -\frac{1}{N}\sum_{i=1}^{N}
+L_{\text{AAM}}
+=
+-\frac{1}{N}
+\sum_{i=1}^{N}
 \log
 \frac{
 e^{s(\cos(\theta_{y_i}) + m)}
@@ -173,7 +177,7 @@ The encoder is built from:
 - a final **Linear** layer
 - **L2 normalization**
 
-### 5.4 Architecture diagram
+### 5.4 TC-ResNet architecture
 
 ```mermaid
 flowchart TD
@@ -227,10 +231,15 @@ The TC-ResNet branch was trained to produce meaningful keyword embeddings. The e
 A common formulation for triplet learning is:
 
 $$
-L_{\text{triplet}} =
+L_{\text{triplet}}
+=
 \max\left(
 0,\,
-\|f(A) - f(P)\|_2^2 - \|f(A) - f(N)\|_2^2 + \alpha
+\|f(A) - f(P)\|_2^2
+-
+\|f(A) - f(N)\|_2^2
++
+\alpha
 \right)
 $$
 
@@ -268,7 +277,7 @@ This was one of the most important parts of the project because it directly teac
 Each training example belongs to one of these cases:
 
 | Case | Speaker | Word | Label |
-|------|---------|------|-------|
+|---|---|---|---|
 | True speaker, true word | Target speaker | Target keyword | Positive |
 | False speaker, true word | Wrong speaker | Target keyword | Negative |
 | True speaker, false word | Target speaker | Wrong keyword | Negative |
@@ -316,14 +325,27 @@ The comparator receives:
 A useful comparison tensor is:
 
 $$
-V_{\text{comp}} =
-[w_c \,\|\, w_{\text{live}} \,\|\, (w_c - w_{\text{live}}) \,\|\, (w_c \odot w_{\text{live}})]
+V_{\text{comp}}
+=
+\left[
+w_c
+\;\Vert\;
+w_{\text{live}}
+\;\Vert\;
+(w_c - w_{\text{live}})
+\;\Vert\;
+(w_c \odot w_{\text{live}})
+\right]
 $$
 
 The final output probability is:
 
 $$
-P_{\text{match}} = \sigma\left(W_2 \cdot \mathrm{ReLU}(W_1 V_{\text{comp}} + b_1) + b_2\right)
+P_{\text{match}}
+=
+\sigma\left(
+W_2 \cdot \mathrm{ReLU}(W_1 V_{\text{comp}} + b_1) + b_2
+\right)
 $$
 
 This helped the model learn non-linear similarity patterns instead of relying only on geometric distance.
@@ -371,12 +393,12 @@ This staged process was useful because each module could learn its own role befo
 
 ## 8. High-level summary of the final architecture
 
-- **PCEN frontend** gives noise-robust acoustic normalization.
-- **ECAPA-TDNN** learns a strong speaker embedding.
-- **TC-ResNet** learns a keyword embedding from custom training data.
-- **FiLM** injects speaker identity into the keyword pathway.
-- **Neural Comparator** makes the final accept/reject decision.
-- **Quad-state training** makes the decision boundary explicit and reliable.
+- PCEN frontend gives noise-robust acoustic normalization.
+- ECAPA-TDNN learns a strong speaker embedding.
+- TC-ResNet learns a keyword embedding from custom training data.
+- FiLM injects speaker identity into the keyword pathway.
+- Neural Comparator makes the final accept/reject decision.
+- Quad-state training makes the decision boundary explicit and reliable.
 
 ---
 
@@ -392,6 +414,8 @@ The final system worked because:
 - and noise augmentation was used throughout.
 
 That combination is what made the architecture practical for speaker-conditioned keyword spotting.
+
+---
 
 ## 10. Datasets used
 

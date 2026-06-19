@@ -16,8 +16,7 @@ Our final system is built from three main parts:
 3. **FiLM + Neural Comparator**  
    Trained on a specially designed **quad-state dataset** containing all four combinations of target/speaker and target/word cases.
 
-The key idea is simple:  
-first learn **who** is speaking, then learn **what** is being spoken, and finally combine both through a speaker-conditioned decision module.
+The key idea is simple: first learn **who** is speaking, then learn **what** is being spoken, and finally combine both through a speaker-conditioned decision module.
 
 ---
 
@@ -70,31 +69,31 @@ PCEN behaves like a trainable dynamic compression and normalization step. It red
 
 ### 4.2 PCEN formulation
 
-Let \(E(t, f)\) be the input time-frequency energy at time \(t\) and frequency bin \(f\). The smoothed background estimate is:
+Let $E(t, f)$ be the input time-frequency energy at time $t$ and frequency bin $f$. The smoothed background estimate is:
 
-\[
+$$
 M(t, f) = (1 - s) M(t - 1, f) + sE(t, f)
-\]
+$$
 
 The PCEN output is:
 
-\[
+$$
 \mathrm{PCEN}(t, f) =
 \left(
 \frac{E(t, f)}{(\epsilon + M(t, f))^\alpha}
 + \delta
 \right)^r
 - \delta^r
-\]
+$$
 
 where:
 
-- \(\epsilon\) is a small stabilizing constant
-- \(M(t, f)\) is the smoothed local energy estimate
-- \(\alpha\) controls noise suppression strength
-- \(\delta\) controls the offset
-- \(r\) controls compression
-- \(s\) controls temporal smoothing
+- $\epsilon$ is a small stabilizing constant
+- $M(t, f)$ is the smoothed local energy estimate
+- $\alpha$ controls noise suppression strength
+- $\delta$ controls the offset
+- $r$ controls compression
+- $s$ controls temporal smoothing
 
 This frontend was important because it made the speaker encoder more stable under real-world noise and reverberation.
 
@@ -109,23 +108,23 @@ The training objective was **Additive Angular Margin Softmax (AAM-Softmax)**.
 
 ### 4.4 AAM-Softmax loss
 
-For a sample \(i\) with ground-truth class \(y_i\), AAM-Softmax is:
+For a sample $i$ with ground-truth class $y_i$, AAM-Softmax is:
 
-\[
+$$
 L_{\text{AAM}} = -\frac{1}{N}\sum_{i=1}^{N}
 \log
 \frac{
- e^{s(\cos(\theta_{y_i}) + m)}
+e^{s(\cos(\theta_{y_i}) + m)}
 }{
- e^{s(\cos(\theta_{y_i}) + m)} + \sum_{j \neq y_i} e^{s\cos(\theta_j)}
+e^{s(\cos(\theta_{y_i}) + m)} + \sum_{j \neq y_i} e^{s\cos(\theta_j)}
 }
-\]
+$$
 
 where:
 
-- \(\theta_{y_i}\) is the angle between the feature and the correct class center
-- \(m\) is the angular margin
-- \(s\) is the scale factor
+- $\theta_{y_i}$ is the angle between the feature and the correct class center
+- $m$ is the angular margin
+- $s$ is the scale factor
 
 This loss helps the speaker embeddings become more compact for the same speaker and more separated across different speakers.
 
@@ -196,17 +195,17 @@ flowchart TD
 
 Each block follows the residual pattern:
 
-\[
+$$
 \text{Output} = \mathrm{ReLU}(F(x) + x)
-\]
+$$
 
-where \(F(x)\) is the stacked convolutional transformation.
+where $F(x)$ is the stacked convolutional transformation.
 
 The blocks progressively increase channel capacity:
 
-- Block 1: \(32 \rightarrow 48\)
-- Block 2: \(48 \rightarrow 64\)
-- Block 3: \(64 \rightarrow 96\)
+- Block 1: $32 \rightarrow 48$
+- Block 2: $48 \rightarrow 64$
+- Block 3: $64 \rightarrow 96$
 
 The stride and dilation settings help the network capture longer phonetic context without making the model too large.
 
@@ -227,20 +226,20 @@ The TC-ResNet branch was trained to produce meaningful keyword embeddings. The e
 
 A common formulation for triplet learning is:
 
-\[
+$$
 L_{\text{triplet}} =
 \max\left(
 0,\,
 \|f(A) - f(P)\|_2^2 - \|f(A) - f(N)\|_2^2 + \alpha
 \right)
-\]
+$$
 
 where:
 
-- \(A\) is the anchor
-- \(P\) is the positive sample
-- \(N\) is the negative sample
-- \(\alpha\) is the margin
+- $A$ is the anchor
+- $P$ is the positive sample
+- $N$ is the negative sample
+- $\alpha$ is the margin
 
 ### 5.8 What worked and what did not
 
@@ -291,17 +290,17 @@ The quad-state formulation forces the model to treat speaker information and key
 
 The speaker embedding is injected into the keyword pathway using **Feature-wise Linear Modulation (FiLM)**.
 
-If \(F \in \mathbb{R}^{C \times T}\) is a feature map and the speaker embedding is \(e_s\), then:
+If $F \in \mathbb{R}^{C \times T}$ is a feature map and the speaker embedding is $e_s$, then:
 
-\[
+$$
 \gamma, \beta = \mathrm{MLP}(e_s)
-\]
+$$
 
 and the feature transformation is:
 
-\[
+$$
 F'_{c,t} = \gamma_c F_{c,t} + \beta_c
-\]
+$$
 
 This lets the speaker representation reshape the keyword features dynamically.
 
@@ -316,16 +315,16 @@ The comparator receives:
 
 A useful comparison tensor is:
 
-\[
+$$
 V_{\text{comp}} =
 [w_c \,\|\, w_{\text{live}} \,\|\, (w_c - w_{\text{live}}) \,\|\, (w_c \odot w_{\text{live}})]
-\]
+$$
 
 The final output probability is:
 
-\[
+$$
 P_{\text{match}} = \sigma\left(W_2 \cdot \mathrm{ReLU}(W_1 V_{\text{comp}} + b_1) + b_2\right)
-\]
+$$
 
 This helped the model learn non-linear similarity patterns instead of relying only on geometric distance.
 

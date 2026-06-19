@@ -4,8 +4,6 @@
 
 This document describes the system we actually built for speaker-conditioned target keyword spotting. The task is to detect a user-defined keyword spoken by a specific target speaker in noisy real-world audio, while keeping the model compact and practical.
 
-This was **not** built with agentic pipelines, LangGraph orchestration, MCP servers, or autonomous tool chains. The real workflow was a direct research and training loop: dataset preparation, model fine-tuning, from-scratch training, loss design, and iterative experiments. That is the honest description of the project.
-
 The final system has three parts:
 
 1. **PCEN + ECAPA-TDNN** for speaker embedding learning.

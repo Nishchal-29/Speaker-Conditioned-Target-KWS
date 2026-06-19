@@ -20,13 +20,13 @@
 
 ### 1. VoxCeleb1 & VoxCeleb2
 - **Source:** https://www.robots.ox.ac.uk/~vgg/data/voxceleb/
-- **Description:** VoxCeleb is a large-scale audio-visual speaker recognition dataset collected from real-world YouTube videos. It contains over one million utterances from thousands of speakers recorded under diverse acoustic conditions, including background chatter, overlapping speech, room reverberation, and varying recording devices. The dataset is widely used for speaker verification, speaker identification, and speaker embedding research. :contentReference[oaicite:0]{index=0}
-- **Usage in Project:** Used as the primary dataset for training and evaluating speaker verification models.
+- **Description:** VoxCeleb is a large-scale audio-visual speaker recognition dataset collected from real-world YouTube videos. It contains over one million utterances from thousands of speakers recorded under diverse acoustic conditions, including background chatter, overlapping speech, room reverberation, and varying recording devices.
+- **Usage in Project:** Used to finetune the ECAPA-TDNN model on PCEN frontend.
 
 ### 2. MUSAN (Music, Speech, and Noise Corpus)
 - **Source:** https://www.openslr.org/17/
-- **Description:** MUSAN is a corpus containing music, speech, and a diverse collection of technical and non-technical noise recordings. It was specifically designed for tasks such as voice activity detection, speech/music discrimination, and robustness enhancement through noise augmentation. :contentReference[oaicite:1]{index=1}
-- **Usage in Project:** Used for real noise injection and data augmentation to improve model robustness against noisy real-world environments.
+- **Description:** MUSAN is a corpus containing music, speech, and a diverse collection of technical and non-technical noise recordings. It was specifically designed for tasks such as voice activity detection, speech/music discrimination, and robustness enhancement through noise augmentation. 
+- **Usage in Project:** Used in training all the three Models, for injecting real world noises to match the required KPIs.
 
 ## Datasets Published
 

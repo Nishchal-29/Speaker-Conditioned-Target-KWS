@@ -69,7 +69,9 @@ PCEN behaves like a trainable dynamic compression and normalization step. It red
 
 ### 4.2 PCEN formulation
 
-Let $E(t, f)$ be the input time-frequency energy at time $t$ and frequency bin $f$. The smoothed background estimate is:
+Let $E(t, f)$ be the input time-frequency energy at time $t$ and frequency bin $f$.
+
+The smoothed background estimate is:
 
 $$
 M(t, f) = (1 - s) M(t - 1, f) + sE(t, f)
@@ -80,8 +82,7 @@ The PCEN output is:
 $$
 \mathrm{PCEN}(t, f) =
 \left(
-\frac{E(t, f)}{(\epsilon + M(t, f))^\alpha}
-+ \delta
+\frac{E(t, f)}{(\epsilon + M(t, f))^\alpha} + \delta
 \right)^r
 - \delta^r
 $$

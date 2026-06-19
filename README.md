@@ -17,7 +17,12 @@
 - **Models Used** - *(Hugging Face links to all models used in the project. You are permitted to use only open weight models.)*
 - **Models Published** - *(In case you have developed a model as a part of your solution, kindly upload it on Hugging Face under appropriate open source license and add the link here.)*
 - **Datasets Used** - *(Links to all datasets used in the project. You are permitted to use publicly available datasets under licenses like Creative Commons, Open Data Commons, or equivalent.)*
-- **Datasets Published** - *(Links to all datasets created for the project and published on Hugging Face. You are allowed to publish any synthetic or proprietary dataset used in their project, but will be responsible for any legal compliance and permission for the same. The dataset can be published under Creative Commons, Open Data Commons, or equivalent license.)*
+## Datasets Published
+
+### TTS Corpus Dataset
+- **Link:** https://huggingface.co/datasets/Nishchal-29/tts_corpus
+- **Description:** A Text-to-Speech (TTS) corpus created for speech synthesis and speaker modeling experiments. The dataset contains recordings from **20 speakers**, with **4 utterances per speaker**, covering approximately **200 unique words**. It is designed to provide a compact, multi-speaker speech dataset suitable for prototyping, benchmarking, and educational research in TTS and speech processing.
+- **License:** Refer to the dataset page for licensing details.
 
 #### Final Presentation
 

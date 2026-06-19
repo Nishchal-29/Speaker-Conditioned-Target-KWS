@@ -11,10 +11,17 @@
 
 ### Project Artefacts
 
-- **Technical Documentation** - Create a **docs** folder and add all technical details in markdown files inside this folder explaining the project Technical Stack, List of OSS libraries/projects used along with their links, the technical architecture of your solution, implementation details, installation instructions, user guide, salient features of the projects. Kindly add screenshots wherever possible.
-- **[Important]** Create a file `docs/ax.md` whiere you explain in detail how you utilizes open weight models and/or agentic development tools to implement your solution. Explain in detail your  Agentic AI setup , Agentic workflows, Reasoning & planning pipelines, Tool use / tool chaining, Coding assistants, agents, harness, MCP servers, agents.md, skills, Memory / context handling, Multi-agent orchestration systems, etc. Please highlight from your experience - what worked and **what did not work**.
-- **Source Code** - Create a **src** folder and add all developed project source codes (including training & benchmark evaluation codes) in the repo. The code must be capable of being successfully installed/executed and must run consistently on the intended platforms.
-- **Models Used** - *(Hugging Face links to all models used in the project. You are permitted to use only open weight models.)*
+## Models Used
+
+### 1. SpeechBrain ECAPA-TDNN (Speaker Verification)
+- **Model:** https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb
+- **Paper:** https://arxiv.org/abs/2005.07143
+- **Description:** ECAPA-TDNN (Emphasized Channel Attention, Propagation and Aggregation in TDNN) is a state-of-the-art speaker embedding architecture for speaker verification. It enhances the traditional TDNN architecture using Res2Net blocks, Squeeze-and-Excitation (SE) modules, hierarchical feature aggregation, and channel-dependent attentive statistics pooling, resulting in highly discriminative speaker embeddings. The pretrained SpeechBrain model is trained on VoxCeleb1 and VoxCeleb2 and is widely used for speaker verification, speaker identification, and diarization tasks. :contentReference[oaicite:0]{index=0}
+
+### 2. TC-ResNet (Temporal Convolutional ResNet)
+- **Paper:** https://arxiv.org/abs/1904.03814
+- **Reference Implementation:** https://github.com/hyperconnect/TC-ResNet
+- **Description:** TC-ResNet is a lightweight residual convolutional architecture designed for speech and audio processing tasks. It employs temporal convolutional residual blocks to efficiently model temporal dependencies in speech signals while maintaining a low computational footprint. Its compact design makes it suitable for real-time and resource-constrained deployments, while still providing strong performance on speech classification and speaker-related tasks.
 - **Models Published** - *(In case you have developed a model as a part of your solution, kindly upload it on Hugging Face under appropriate open source license and add the link here.)*
 ## Datasets Used
 

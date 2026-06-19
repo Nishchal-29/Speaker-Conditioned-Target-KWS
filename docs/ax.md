@@ -2,36 +2,34 @@
 
 ## Speaker-Conditioned Target Keyword Spotting
 
-This document explains the final system we actually built for speaker-conditioned target keyword spotting. The goal was simple to state but hard to solve: detect a user-defined keyword spoken by a specific target speaker, even in noisy real-world audio, while keeping the system lightweight and practical.
+This document describes the system we actually built for speaker-conditioned target keyword spotting. The task is to detect a user-defined keyword spoken by a specific target speaker in noisy real-world audio, while keeping the model compact and practical.
 
-The final implementation was **not** based on an agentic workflow or multi-agent orchestration. We did not use LangGraph-style planning, MCP servers, or autonomous tool chains in the actual training pipeline. Instead, we used a direct research-and-training workflow: manual dataset preparation, model fine-tuning, loss design, and end-to-end experimentation. That is the honest description of the work in this project.
+This was **not** built with agentic pipelines, LangGraph orchestration, MCP servers, or autonomous tool chains. The real workflow was a direct research and training loop: dataset preparation, model fine-tuning, from-scratch training, loss design, and iterative experiments. That is the honest description of the project.
 
-The system is built from three main parts:
+The final system has three parts:
 
 1. **PCEN + ECAPA-TDNN** for speaker embedding learning.
-2. **TC-ResNet** for custom keyword encoding.
+2. **PCEN + TC-ResNet** for keyword embedding learning.
 3. **FiLM + Neural Comparator** for speaker-conditioned matching.
 
-The key design idea was to separate “who is speaking” from “what word is being spoken,” and then bring both signals together only at the decision stage.
+The main idea is to separate **who is speaking** from **what word is being spoken**, and then combine both signals only at the final decision stage.
 
 ---
 
-## 1. What We Built and Why
+## 1. What We Built
 
-Traditional keyword spotting systems usually assume a fixed vocabulary and a clean microphone signal. That does not match the problem we wanted to solve. We needed a system that can:
+A standard keyword spotter usually assumes a fixed vocabulary and relatively clean speech. That is not enough for our use case. We needed a system that can:
 
 - learn a **custom keyword**,
-- work for a **specific speaker**,
-- survive **background noise**,
-- and run as a compact deep-learning pipeline.
+- work for a **specific target speaker**,
+- remain robust in **background noise**,
+- and stay lightweight enough to be practical.
 
-To do that, we used a two-track training strategy:
+To do that, we used a two-track approach:
 
-- **Speaker track:** fine-tune a pre-trained SpeechBrain ECAPA-TDNN model on VoxCeleb with a PCEN frontend and a custom AAM-Softmax objective.
-- **Keyword track:** train a TC-ResNet model from scratch on our own `tts_corpus` dataset, with MUSAN-based noise augmentation, so it learns the acoustic shape of words rather than fixed labels only.
-- **Conditioning and comparison track:** train the FiLM-based conditioning layers and the neural comparison module from scratch so the system can combine speaker identity and keyword similarity in one learned decision process.
-
-This design kept the speaker encoder strong, made the keyword encoder flexible, and allowed the final system to learn how to reject noise and mismatched speech.
+- **Speaker track:** fine-tune a pretrained SpeechBrain ECAPA-TDNN model on VoxCeleb using a PCEN frontend and a custom AAM-Softmax objective.
+- **Keyword track:** train a TC-ResNet model from scratch on our own `tts_corpus` dataset, with MUSAN-based noise augmentation, so it learns the acoustic shape of words rather than only fixed labels.
+- **Conditioning and comparison track:** train the FiLM module and Neural Comparator from scratch so the system can combine speaker identity and keyword similarity in one learned decision process.
 
 ---
 
@@ -40,8 +38,8 @@ This design kept the speaker encoder strong, made the keyword encoder flexible, 
 ```mermaid
 flowchart LR
     A[Raw audio input] --> B[PCEN frontend]
-    B --> C1[Speaker branch: ECAPA-TDNN]
-    B --> C2[Keyword branch: TC-ResNet]
+    B --> C1[Speaker branch ECAPA-TDNN]
+    B --> C2[Keyword branch TC-ResNet]
 
     C1 --> D1[Speaker embedding]
     C2 --> D2[Keyword embedding]
@@ -50,33 +48,33 @@ flowchart LR
     D2 --> E
 
     E --> F[Neural Comparator]
-    F --> G[Trigger / No Trigger]
+    F --> G[Trigger or No Trigger]
 ```
 
 ### Intuition
 
-- The **PCEN frontend** stabilizes the signal before the neural networks see it.
-- The **ECAPA-TDNN branch** captures the identity of the speaker.
-- The **TC-ResNet branch** captures the acoustic pattern of the keyword.
-- **FiLM** uses the speaker embedding to modulate hidden activations in the keyword branch.
+- **PCEN** stabilizes the signal before the networks see it.
+- **ECAPA-TDNN** captures the identity of the target speaker.
+- **TC-ResNet** captures the acoustic structure of the keyword.
+- **FiLM** uses the speaker embedding to modulate hidden activations in the keyword path.
 - The **Neural Comparator** decides whether the live speech matches the enrolled target keyword for the enrolled target speaker.
 
 ---
 
-## 3. Data Used in the Project
+## 3. Data Used
 
 ### 3.1 VoxCeleb for speaker learning
-We used **VoxCeleb** for the ECAPA-TDNN speaker branch. VoxCeleb is a widely used speaker recognition dataset collected from unconstrained real-world media, which makes it a good match for speaker-embedding learning in noisy conditions.
+We used **VoxCeleb** for the ECAPA-TDNN speaker branch. It is a real-world speaker recognition dataset with a lot of speaker variation, which makes it a strong fit for learning speaker identity.
 
 ### 3.2 MUSAN for noise injection
-We used **MUSAN** for background noise, music, and speech augmentation. This helped the model learn robustness to real-world interference instead of overfitting to clean studio speech.
+We used **MUSAN** for background noise, music, and speech augmentation. This helped the model learn robustness to real-world interference instead of overfitting to clean audio.
 
 ### 3.3 `tts_corpus` for keyword learning
-We used our own custom dataset:
+We used our custom dataset:
 
 `https://huggingface.co/datasets/Nishchal-29/tts_corpus`
 
-This dataset was used for the TC-ResNet training stage. The important point is that this is **our own synthetic/custom TTS corpus**, and the TC-ResNet was trained **from scratch** on it, not merely fine-tuned.
+This dataset was used for the TC-ResNet training stage. The key point is that this is **our own synthetic/custom TTS corpus**, and the TC-ResNet was trained **from scratch** on it.
 
 ### 3.4 Why this combination worked
 The datasets played different roles:
@@ -85,7 +83,7 @@ The datasets played different roles:
 - **MUSAN** taught the model how to survive noise.
 - **tts_corpus** taught the model what the custom word sounds like.
 
-That division made the training pipeline much cleaner.
+That separation made the training pipeline much cleaner.
 
 ---
 
@@ -93,45 +91,45 @@ That division made the training pipeline much cleaner.
 
 We replaced the usual mel-spectrogram frontend with **PCEN (Per-Channel Energy Normalization)**.
 
-### Why we changed the frontend
-ECAPA-TDNN is commonly used with mel-spectrogram-style inputs, but our environment had stronger noise and loudness variation than a standard clean-speech setup. PCEN is useful because it acts like a smoother, adaptive normalization stage before the network learns its features.
+### Why we changed it
+The original ECAPA setup is commonly used with mel-style features, but our setting had stronger noise and loudness variation. PCEN works better as an adaptive frontend because it smooths the input and reduces the effect of sudden amplitude spikes.
 
-### What PCEN did for us
-- reduced the impact of sudden noise bursts,
+### What PCEN gave us
+- reduced the effect of sudden noise bursts,
 - stabilized loudness differences,
-- made the input more robust for speaker embedding learning,
+- made the input more robust for speaker learning,
 - and improved training behavior in noisy audio.
 
 ### Simple interpretation
-PCEN does not magically remove all noise. Instead, it makes the signal more consistent so the neural network can focus on useful speech structure.
+PCEN does not remove all noise. It makes the signal easier for the network to learn from.
 
 ---
 
-## 5. ECAPA-TDNN: Speaker Branch
+## 5. ECAPA-TDNN Speaker Branch
 
-We used the **SpeechBrain ECAPA-TDNN** model as the starting point for the speaker branch and fine-tuned it for our setting.
+We used the **SpeechBrain ECAPA-TDNN** model as the starting point for the speaker branch and fine-tuned it.
 
-### What ECAPA-TDNN does
-ECAPA-TDNN is a speaker embedding model. It turns an utterance into a compact representation that captures speaker identity. In our system, that embedding is used as the speaker signature.
+### What it does
+ECAPA-TDNN converts an utterance into a compact embedding that captures speaker identity. In our system, that embedding becomes the speaker signature.
 
 ### What we changed
-The important change was not just “use ECAPA-TDNN.” The real change was:
+The real change was:
 
-- keep the **ECAPA architecture**,
+- keep the ECAPA backbone,
 - replace the frontend with **PCEN**,
-- train with **VoxCeleb**,
+- train on **VoxCeleb**,
 - augment with **MUSAN**,
-- and optimize using a **custom AAM-Softmax objective**.
+- and optimize using a **custom AAM-Softmax loss**.
 
-### Why fine-tuning instead of training from scratch
-Fine-tuning was the right choice because ECAPA-TDNN already knows how to learn speaker identity well. Training from scratch would have required much more data and compute. Fine-tuning let us adapt the model to our frontend and noise conditions without losing the benefit of the pretrained speaker backbone.
+### Why fine-tuning was the right choice
+ECAPA-TDNN already has a strong bias toward speaker verification. Fine-tuning let us adapt the model to our frontend and noise conditions without losing the benefit of the pretrained speaker backbone.
 
 ### What the speaker branch learns
-The branch learns a stable embedding for the enrolled speaker. That embedding is later reused as conditioning information, so the runtime system does not need to re-run a heavy speaker-verification model every time.
+The branch learns a stable speaker embedding. That embedding is later reused as conditioning information, so the runtime system does not need to keep running a heavy speaker model at inference time.
 
 ---
 
-## 6. AAM-Softmax Objective for ECAPA-TDNN
+## 6. AAM-Softmax for ECAPA-TDNN
 
 For the speaker branch, we used a custom **AAM-Softmax** loss.
 
@@ -139,102 +137,109 @@ For the speaker branch, we used a custom **AAM-Softmax** loss.
 Speaker embeddings should satisfy two properties:
 
 - embeddings from the same speaker should be close,
-- embeddings from different speakers should be well separated.
+- embeddings from different speakers should be far apart.
 
-AAM-Softmax is a good fit because it explicitly encourages angular separation in embedding space. That makes the embedding geometry more discriminative, which is useful for speaker recognition and verification.
-
-### In our project
-We used the loss to strengthen the separation between speakers while the ECAPA branch learned from our PCEN-based input pipeline.
+AAM-Softmax is good at that because it encourages angular separation in embedding space. That makes the speaker representation more discriminative.
 
 ---
 
-## 7. TC-ResNet: Keyword Branch
+## 7. TC-ResNet Keyword Branch
 
 The second major component is **TC-ResNet**, which we trained **from scratch**.
 
 ### Why TC-ResNet
-TC-ResNet is small, efficient, and designed for keyword spotting. It is a good match for short utterances and edge-friendly deployment.
+TC-ResNet is small, efficient, and suitable for keyword spotting. It works well for short utterances and compact deployment.
 
 ### What we changed
-Instead of using it as a standard fixed-label keyword classifier, we used it to learn a stronger acoustic representation of the custom keyword space.
+We did not use it as a standard fixed-label classifier only. We used it as a strong acoustic encoder for the custom keyword space.
 
 ### Training data
 For this branch, we used:
+
 - our custom `tts_corpus` dataset,
 - MUSAN noise injection,
-- and additional augmentation to make the words sound like real-world speech.
+- and additional augmentation to make the words more realistic.
 
-### Why training from scratch made sense here
-The keyword vocabulary was custom and not limited to a standard benchmark list. Training from scratch on our own corpus let the model learn exactly the word patterns we cared about, rather than adapting from a mismatched pretraining task.
+### Why training from scratch made sense
+Our keyword vocabulary was custom and not limited to a standard benchmark list. Training from scratch on our own corpus let the model learn exactly the word patterns we wanted.
 
-### TC-ResNet block diagram from our code
-
-The implementation below is the cleanest way to understand the keyword branch:
+### TC-ResNet code-to-architecture diagram
 
 ```mermaid
 flowchart TD
-    A[Raw audio] --> B[Learnable PCEN]
-    B --> C[PCEN features]
-    C --> D[SpecAugment<br/>FrequencyMask + TimeMask]
-    D --> E[Conv1d 80 -> 32<br/>kernel 9, padding 4]
+    A[Raw Audio 16 kHz] --> B[Learnable PCEN]
+    B --> C[PCEN Features]
+    C --> D[SpecAugment]
+    D --> E[Conv1D 80 to 32]
     E --> F[BatchNorm + ReLU]
-    F --> G[TCResNetBlock 1<br/>32 -> 48, stride 2, dilation 1]
-    G --> H[TCResNetBlock 2<br/>48 -> 64, stride 2, dilation 2]
-    H --> I[TCResNetBlock 3<br/>64 -> 96, stride 2, dilation 4]
-    I --> J[AdaptiveAvgPool1d(1)]
-    J --> K[Linear 96 -> 128]
-    K --> L[L2 normalization]
-    L --> M[128-D keyword embedding]
+    F --> G[TCResNetBlock 1 32 to 48]
+    G --> H[TCResNetBlock 2 48 to 64]
+    H --> I[TCResNetBlock 3 64 to 96]
+    I --> J[AdaptiveAvgPool1d]
+    J --> K[Linear 96 to 128]
+    K --> L[L2 Normalization]
+    L --> M[128-D Keyword Embedding]
 ```
 
 ### How each block maps to the code
 
-- **Learnable PCEN**: turns raw audio into robust PCEN features before the neural network sees them.
-- **SpecAugment**: randomly masks frequency bands and time spans during training so the encoder does not memorize brittle patterns.
-- **Initial Conv1d**: converts the 80-channel acoustic input into a 32-channel feature map.
-- **TCResNetBlock 1**: expands representation from 32 to 48 channels while reducing time resolution.
-- **TCResNetBlock 2**: increases the channels to 64 and uses a larger dilation to widen the receptive field.
-- **TCResNetBlock 3**: produces the final 96-channel temporal representation.
-- **Adaptive average pooling**: compresses the time dimension into one embedding vector.
-- **Linear layer**: maps the 96-D pooled vector to the final 128-D embedding.
-- **L2 normalization**: makes the output embedding stable for comparison and downstream matching.
+- **Learnable PCEN** converts raw audio into robust PCEN features.
+- **SpecAugment** masks frequency bands and time spans during training.
+- **Conv1D** maps the 80-channel acoustic input into a 32-channel feature map.
+- **TCResNetBlock 1** expands 32 to 48 channels with stride 2 and dilation 1.
+- **TCResNetBlock 2** expands 48 to 64 channels with stride 2 and dilation 2.
+- **TCResNetBlock 3** expands 64 to 96 channels with stride 2 and dilation 4.
+- **AdaptiveAvgPool1d** compresses the time dimension into one vector.
+- **Linear layer** maps the 96-D pooled vector to a 128-D embedding.
+- **L2 normalization** makes the embedding stable for comparison.
 
-### What this design achieves
+### Residual block view
 
-This block structure is small, efficient, and easy to train. It keeps the network focused on acoustic patterns that matter for the custom word while still being compact enough for a practical keyword spotting system.
+```mermaid
+flowchart LR
+    A[Input] --> B[Conv1D k=9]
+    B --> C[BatchNorm]
+    C --> D[ReLU]
+    D --> E[Conv1D k=9]
+    E --> F[BatchNorm]
+    F --> G[Add Residual]
+    G --> H[ReLU]
+    H --> I[Output]
+
+    A --> G
+```
+
+This block is repeated with different channel sizes, strides, and dilations to build the full encoder.
 
 ---
 
-## 8. Noise Augmentation with MUSAN
+## 8. MUSAN Noise Augmentation
 
 MUSAN was used across the pipeline for realistic noise augmentation.
 
-### What we did with it
-We mixed clean utterances with noise at different levels so the models would see a wide range of noisy conditions during training.
+### What we did
+We mixed clean utterances with noise at different levels so the model would see a wide range of noisy conditions during training.
 
 ### Why it mattered
-Without noise augmentation, the model would likely overfit to clean audio and fail in real environments. MUSAN gave us a way to simulate difficult conditions without collecting every real-world scenario ourselves.
-
-### Main effect
-The model learned to focus on phonetic and speaker cues that survive noise instead of depending on clean acoustic detail.
+Without noise augmentation, the model would likely overfit to clean speech and fail in real environments. MUSAN forced the models to learn useful acoustic cues instead of clean-speech shortcuts.
 
 ---
 
 ## 9. FiLM Conditioning Module
 
-After the two branches learn their own embeddings, we use **FiLM (Feature-wise Linear Modulation)** to condition the keyword path on the speaker embedding.
+After the two branches learn their embeddings, we use **FiLM (Feature-wise Linear Modulation)** to condition the keyword path on the speaker embedding.
 
 ### What FiLM does
-FiLM takes the speaker embedding and turns it into scaling and shifting parameters that modulate hidden activations in the keyword network.
+FiLM turns the speaker embedding into scale and shift parameters that modulate hidden activations in the keyword network.
 
 ### Why we used it
-The purpose of FiLM in our system is to let the network focus on the target speaker’s acoustic pattern and suppress irrelevant voices or background interference.
+The goal is to make the model focus on the target speaker’s acoustic pattern and suppress irrelevant voices or background interference.
 
-### Why we trained this from scratch
-This part is very specific to our architecture. It is not a standard off-the-shelf module for this task, so training it from scratch let the model learn the right modulation behavior for our exact speaker-keyword setup.
+### Why we trained it from scratch
+This module is specific to our architecture, so training it from scratch let the model learn the right modulation behavior for our exact speaker-keyword setup.
 
 ### Simple intuition
-If ECAPA gives us “who is speaking,” FiLM uses that answer to reshape “what the network should listen for.”
+ECAPA gives us “who is speaking.” FiLM uses that answer to reshape “what the network should listen for.”
 
 ---
 
@@ -243,22 +248,51 @@ If ECAPA gives us “who is speaking,” FiLM uses that answer to reshape “wha
 The final decision is made by a learned **Neural Comparator**.
 
 ### What it compares
-It compares the enrolled keyword template with the live keyword embedding, after conditioning.
+It compares the enrolled keyword template with the live keyword embedding after conditioning.
 
 ### Why not use only cosine similarity
-A static similarity score is simple, but it is not flexible enough to learn complex noisy cases. A small neural comparator can learn patterns like:
+A static similarity score is simple, but it is not flexible enough to learn difficult noisy cases. A small neural comparator can learn:
 
 - when to trust a dimension,
 - when to down-weight noisy features,
-- when two embeddings are truly matching,
+- when two embeddings truly match,
 - and when the match is only superficial.
-
-### Why training from scratch was important
-Because the comparator is tightly tied to our model design, we trained the whole architecture from scratch so this module could learn the final match decision in the same feature space used by the rest of the system.
 
 ---
 
-## 11. End-to-End Training Flow
+## 11. Quad-State Training Dataset for FiLM + Neural Comparator
+
+This was one of the most important design choices in the final stage.
+
+We used a specially designed **quad-state dataset** so the FiLM + Neural Comparator module could learn all important combinations of speaker and word correctness.
+
+### The four cases
+
+1. **True word, true speaker**
+   - The correct keyword spoken by the correct enrolled speaker.
+   - This is the positive trigger case.
+
+2. **True word, false speaker**
+   - The correct keyword spoken by a different speaker.
+   - This teaches the system to reject imposters even if the word is correct.
+
+3. **False word, true speaker**
+   - A wrong or phonetically similar word spoken by the enrolled speaker.
+   - This teaches the system not to trigger on the right voice alone.
+
+4. **False word, false speaker**
+   - Wrong word spoken by the wrong speaker.
+   - This is the easiest negative case, but it is still important for stability.
+
+### Why this dataset mattered
+This quad-state setup forced the FiLM conditioning and Neural Comparator to learn the actual decision boundary of the task. The model could not simply memorize “speaker correct” or “keyword correct.” It had to learn the interaction between both.
+
+### Practical effect
+This made the final decision module much more reliable, especially on confusing near-matches and noisy utterances.
+
+---
+
+## 12. End-to-End Training Flow
 
 ```mermaid
 flowchart TD
@@ -268,26 +302,26 @@ flowchart TD
     D --> F[Extract keyword embeddings]
     E --> G[Train FiLM conditioning]
     F --> G
-    G --> H[Train Neural Comparator]
+    G --> H[Train Neural Comparator on quad-state dataset]
     H --> I[Evaluate on noisy target-speaker keyword spotting]
 ```
 
 ### What this means in practice
-The training was not one single pass. It was a staged process:
+The training was staged, not a single pass:
 
-1. **Preprocess the audio** with PCEN and augmentation.
-2. **Fine-tune ECAPA-TDNN** on VoxCeleb using AAM-Softmax.
-3. **Train TC-ResNet from scratch** on the TTS keyword corpus.
-4. **Train the FiLM module** so speaker conditioning works correctly.
-5. **Train the Neural Comparator** so the final trigger decision is learned, not hard-coded.
-6. **Evaluate** on noisy and speaker-mismatched conditions.
+1. preprocess audio with PCEN and augmentation,
+2. fine-tune ECAPA-TDNN on VoxCeleb using AAM-Softmax,
+3. train TC-ResNet from scratch on the TTS keyword corpus,
+4. train FiLM using the quad-state examples,
+5. train the Neural Comparator on the same structured cases,
+6. evaluate on noisy and speaker-mismatched conditions.
 
 ---
 
-## 12. Training Details and Thought Process
+## 13. Training Details and Thought Process
 
-### 12.1 Why the pipeline was split into stages
-We split the work because each part has a different job:
+### Why the pipeline was split into stages
+Each part had a different job:
 
 - speaker recognition,
 - keyword encoding,
@@ -296,82 +330,82 @@ We split the work because each part has a different job:
 
 Training them separately first made debugging easier and improved stability.
 
-### 12.2 Why the speaker branch was fine-tuned, not rebuilt
-ECAPA-TDNN already has a strong inductive bias for speaker verification. Fine-tuning was enough to adapt it to our PCEN frontend and our training setup.
+### Why the speaker branch was fine-tuned, not rebuilt
+ECAPA-TDNN already has a strong inductive bias for speaker verification. Fine-tuning was enough to adapt it to our PCEN frontend and noise setup.
 
-### 12.3 Why the keyword branch was trained from scratch
-The custom keyword corpus did not match a standard pretraining scenario, so a clean from-scratch training run was more appropriate than forcing a pretrained keyword classifier into our use case.
+### Why the keyword branch was trained from scratch
+The custom keyword corpus did not match a standard pretraining scenario, so a from-scratch training run was more appropriate than forcing a pretrained keyword classifier into the task.
 
-### 12.4 Why FiLM and the comparator were trained together
-These modules are responsible for the final interaction between speaker identity and keyword identity. Training them from scratch let them learn the exact matching behavior we wanted instead of inheriting assumptions from another task.
+### Why FiLM and the comparator were trained together
+These modules are responsible for the final interaction between speaker identity and keyword identity. Training them from scratch let them learn the exact matching behavior we wanted.
 
 ---
 
-## 13. What Worked Well
+## 14. What Worked Well
 
 ### PCEN frontend
-PCEN was one of the most useful design choices. It made the audio more stable under noise and loudness shifts.
+PCEN was one of the most useful choices. It made the audio more stable under noise and loudness shifts.
 
 ### ECAPA-TDNN fine-tuning
 Using the SpeechBrain ECAPA-TDNN model gave us a strong speaker representation quickly. Fine-tuning on our frontend and data made it fit the project much better than a raw off-the-shelf model.
 
 ### MUSAN augmentation
-Noise injection with MUSAN significantly improved robustness. It forced the models to learn useful features instead of clean-speech shortcuts.
+Noise injection with MUSAN improved robustness and reduced dependence on clean speech.
 
-### Training TC-ResNet from scratch on our own corpus
-This worked well because the model learned the exact word patterns and pronunciations present in our synthetic data.
+### TC-ResNet from scratch on our own corpus
+This worked well because the model learned the exact word patterns and pronunciations in our synthetic data.
 
-### End-to-end joint thinking
-Even though the parts were trained in stages, we designed them as one system from the start. That made the architecture coherent and easier to reason about.
+### Quad-state dataset for FiLM + comparator
+This was especially useful because it gave the final decision module all important positive and negative combinations instead of only a simple yes/no split.
 
 ---
 
-## 14. What Did Not Work as Well
+## 15. What Did Not Work as Well
 
 ### Using a standard speech frontend unchanged
-A plain mel-spectrogram setup would have been easier, but it was not as robust for our target noisy setting. That is why we moved to PCEN.
+A plain mel-spectrogram setup was easier, but it was not as robust for our noisy setting. That is why we moved to PCEN.
 
-### Treating keyword spotting as a plain classification problem
+### Treating keyword spotting as plain classification
 A simple closed-set classifier is not a good fit for custom keywords and target-speaker conditioning. It is too rigid.
 
-### Trying to rely only on a static similarity metric
-A static comparator is easier to implement, but it does not learn how to handle difficult false-accept cases as well as a trained neural comparator.
+### Relying only on a static similarity metric
+A static comparator is easy to implement, but it does not learn difficult false-accept cases as well as a trained neural comparator.
 
-### Overcomplicating the system with unnecessary orchestration
-An agentic pipeline sounded attractive on paper, but it was not required for the final implementation. The real gains came from model design, data design, and careful training rather than multi-agent automation.
+### Adding unnecessary orchestration
+An agentic pipeline sounded interesting on paper, but it was not needed for the final implementation. The real gains came from model design, data design, and careful training.
 
 ---
 
-## 15. Simple Summary of the Full System
+## 16. Simple Summary of the Full System
 
 At a high level, the system works like this:
 
 - The user enrolls a speaker and keyword.
-- The speaker side is represented by an ECAPA-TDNN embedding.
-- The keyword side is represented by a TC-ResNet embedding.
+- ECAPA-TDNN produces a speaker embedding.
+- TC-ResNet produces a keyword embedding.
 - PCEN makes the audio more stable.
 - FiLM uses the speaker embedding to condition the keyword branch.
-- The Neural Comparator produces the final match decision.
+- The Neural Comparator decides whether the live speech matches the enrolled target.
 
-The result is a compact speaker-conditioned keyword spotting system that is designed for noisy conditions and custom words.
+The result is a compact speaker-conditioned keyword spotting system designed for noisy conditions and custom words.
 
 ---
 
-## 16. References and Data Sources
+## 17. References and Data Sources
 
 - **ECAPA-TDNN**: Desplanques, Thienpondt, and Demuynck, *ECAPA-TDNN: Emphasized Channel Attention, Propagation and Aggregation in TDNN Based Speaker Verification*.
-- **SpeechBrain ECAPA-TDNN model**: pretrained speaker verification model used as the starting point for our speaker branch.
-- **VoxCeleb**: speaker recognition dataset used for the speaker embedding branch.
+- **SpeechBrain ECAPA-TDNN**: pretrained speaker verification model used as the starting point for the speaker branch.
+- **VoxCeleb**: speaker recognition dataset used for speaker embedding learning.
 - **MUSAN**: noise corpus used for augmentation.
 - **PCEN**: Per-Channel Energy Normalization frontend for robust audio preprocessing.
 - **TC-ResNet**: lightweight keyword spotting architecture used for the keyword branch.
-- **FiLM**: Feature-wise Linear Modulation used for conditioning the keyword branch on speaker identity.
+- **FiLM**: Feature-wise Linear Modulation used for conditioning.
 - **AAM-Softmax**: margin-based speaker-discriminative loss used for the speaker branch.
 - **Custom TTS corpus**: `https://huggingface.co/datasets/Nishchal-29/tts_corpus`
 
 ---
 
-## 17. Closing Note
+## 18. Closing Note
 
 This project was built as a practical speech system, not as an agent demo. The real contribution was in the architectural choices:
 
@@ -380,6 +414,7 @@ This project was built as a practical speech system, not as an agent demo. The r
 - TC-ResNet for keyword structure,
 - MUSAN for noise robustness,
 - FiLM for conditioning,
+- the quad-state dataset for decision learning,
 - and a neural comparator for learned matching.
 
-That combination is what makes the final system simple to explain but still technically strong.
+That combination is what makes the final system simple to explain but technically strong.

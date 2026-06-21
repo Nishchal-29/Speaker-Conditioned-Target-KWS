@@ -82,6 +82,6 @@ if __name__ == "__main__":
     parser.add_argument("--speaker_emb", type=str, required=True, help="Path to the 192-D speaker embedding (.pt)")
     parser.add_argument("--enroll_audio", nargs='+', required=True, help="Paths to 3 enrollment audio files (target speaker saying target word)")
     parser.add_argument("--test_audio", type=str, required=True, help="Path to the test .wav file")
-    parser.add_argument("--threshold", type=float, default=0.70, help="Cosine similarity threshold")
+    parser.add_argument("--threshold", type=float, default=0.9, help="Cosine similarity threshold")
     args = parser.parse_args()
     verify_audio(args)

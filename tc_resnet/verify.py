@@ -10,7 +10,7 @@ import torch
 import torch.nn.functional as F
 import librosa
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from pcen import LearnablePCEN
 from model import TCResNetAcousticEncoder

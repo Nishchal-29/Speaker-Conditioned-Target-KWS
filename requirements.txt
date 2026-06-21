@@ -1,0 +1,40 @@
+# ==============================================================
+# Speaker-Conditioned Target KWS — Python Dependencies
+# Install: pip install -r requirements.txt
+#
+# NOTE: Install PyTorch + torchaudio FIRST with the correct
+# CUDA version for your system before running this file.
+# See: https://pytorch.org/get-started/locally/
+#
+# Example (CUDA 11.8):
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
+#
+# Example (CPU only):
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+# ==============================================================
+
+# --- Core ML Framework ---
+# torch            # Install separately (see note above)
+# torchaudio        # Install separately (see note above)
+
+# --- Audio Processing ---
+librosa>=0.10.0
+soundfile>=0.12.0
+edge-tts>=6.1.0
+
+# --- Speaker Embedding (ECAPA-TDNN) ---
+speechbrain>=1.0.0
+
+# --- ONNX Runtime (Inference / Export Validation) ---
+onnxruntime>=1.16.0
+
+# --- Scientific Computing ---
+numpy>=1.24.0
+scipy>=1.10.0
+scikit-learn>=1.2.0
+
+# --- Training Utilities ---
+tqdm>=4.65.0
+
+# --- Dataset Download (Optional, for HuggingFace TTS corpus) ---
+huggingface_hub>=0.20.0

@@ -1,51 +1,97 @@
 # Speaker-Conditioned Target Keyword Spotting (SC-TKWS)
 
-## Technical Report for Training, Architecture, and Design Choices
-
-## 1. Overview
-
-This project solves speaker-conditioned custom keyword spotting in noisy environments. The goal is to detect a user-defined keyword only when it is spoken by the enrolled target speaker, even under heavy acoustic degradation.
+A zero-shot, speaker-aware keyword spotting system that triggers **only when the enrolled speaker says the enrolled keyword**.
 
 Unlike conventional wake-word systems that activate when anyone speaks a trigger phrase, SC-TKWS combines biometric speaker verification and phonetic keyword verification into a single edge-deployable architecture.
 
-Our final system is built from three main functional components, exported and optimized for edge deployment:
+The system was designed for:
 
-1. **ECAPA-TDNN speaker encoder**
-Fine-tuned using a **PCEN frontend** on **VoxCeleb** with **MUSAN noise injection** and **AAM-Softmax** loss. It extracts a 192-dimensional biometric representation of the speaker ($e_s \in \mathbb{R}^{192}$). Used only during enrollment.
-2. **TC-ResNet keyword encoder**
-Trained **from scratch** on our custom **`tts_corpus`** dataset, yielding a 128-D normalized keyword embedding.
-3. **FiLM Generator + Neural Comparator**
-The FiLM generator dynamically transforms the 192-D speaker embedding into modulation parameters to condition the TC-ResNet, while the Neural Comparator replaces static cosine similarity with a learned decision boundary.
+* Personalized wake words
+* Voice-controlled IoT devices
+* Secure voice authentication
+* Offline assistants
+* Embedded and edge deployment
 
-The key idea is simple: first learn **who** is speaking, then learn **what** is being spoken, and finally combine both through a speaker-conditioned decision module.
-
----
-
-## 2. Why this architecture
-
-A standard keyword spotter is not enough for our use case because it usually treats the word as the only signal of interest. That fails when the same keyword is spoken by the wrong speaker or when a different word is spoken by the target speaker.
-
-We needed a system that learns two different forms of information:
-
-* **Biometric identity**: the speaker’s voice characteristics
-* **Phonetic identity**: the keyword content itself
-
-That is why we designed the system in stages instead of training a single monolithic classifier. This also helped us keep the architecture modular and computationally lightweight. The entire inference stack excluding the ECAPA-TDNN encoder consumes only **≈372K parameters**:
-
-* **FiLM Generator**: ≈74K parameters
-* **FiLM-TC-ResNet Encoder**: ≈286K parameters
-* **Neural Comparator**: ≈12K parameters
-
-This modularity provides clear tactical advantages:
-
-* ECAPA-TDNN is responsible for speaker representation.
-* TC-ResNet is responsible for keyword representation.
-* FiLM uses the speaker embedding to condition the keyword network.
-* The Neural Comparator decides whether the live keyword matches the enrolled template.
+All inference components are exported to ONNX and optimized for low-latency execution.
 
 ---
 
-## 3. System flow
+## Motivation
+
+Traditional keyword spotting systems solve:
+
+> "Was the keyword spoken?"
+
+SC-TKWS solves:
+
+> "Was the enrolled keyword spoken by the enrolled user?"
+
+This requires jointly modeling:
+
+* **Speaker Identity** (WHO spoke?)
+* **Keyword Intent** (WHAT was spoken?)
+
+while remaining computationally lightweight enough for edge deployment.
+
+---
+
+## Architecture and System Flow
+
+### Enrollment Phase
+
+```text
+                    Enrollment
+┌──────────────────────────────────────────┐
+│                                          │
+│  User says custom keyword 3 times        │
+│                                          │
+└──────────────────────────────────────────┘
+                    │
+                    ▼
+        ECAPA-TDNN Speaker Encoder
+                    │
+                    ▼
+         192-D Speaker Embedding
+                    │
+                    ▼
+             FiLM Generator
+                    │
+          γ (gamma), β (beta)
+                    │
+                    ▼
+        FiLM-Conditioned TC-ResNet
+                    │
+                    ▼
+          128-D Keyword Template
+                    │
+                    ▼
+             Stored Profile
+
+```
+
+### Inference Phase
+
+```text
+Incoming Audio
+      │
+      ▼
+KWS PCEN Frontend
+      │
+      ▼
+FiLM-TC-ResNet
+      │
+      ▼
+128-D Query Embedding
+      │
+      ▼
+Neural Comparator
+      │
+      ▼
+Accept / Reject
+
+```
+
+### End-to-End System Flow
 
 ```mermaid
 flowchart LR
@@ -63,108 +109,69 @@ flowchart LR
 
 ---
 
-## 4. Stage 1: ECAPA-TDNN speaker encoder
+## Core Components
 
-We used the open-source **SpeechBrain ECAPA-TDNN** model as the starting point for speaker representation learning. The model was not used as-is. We fine-tuned it on our setup so that it works with our **PCEN frontend** instead of the default mel-spectrogram pipeline.
+### 1. ECAPA-TDNN Speaker Encoder
 
-### 4.1 Why PCEN
+Extracts a 192-dimensional biometric representation. Used only during enrollment.
 
-The original ECAPA-TDNN is commonly trained on mel-spectrogram features. In our case, we wanted stronger robustness in noisy environments, so we replaced the frontend with **Per-Channel Energy Normalization (PCEN)**.
+**Input:**
 
-PCEN behaves like a trainable dynamic compression and normalization step. It reduces the effect of background noise while preserving speech transients.
+* PCEN Features
+* 3-second audio window
 
-### 4.2 PCEN formulation
+**Output:**
+$e_s \in \mathbb{R}^{192}$
 
-Let $E(t, f)$ be the input time-frequency energy at time $t$ and frequency bin $f$.
+**PCEN Formulation:**
+PCEN behaves like a trainable dynamic compression and normalization step. The smoothed background estimate is:
 
-The smoothed background estimate is:
 
 $$M(t, f) = (1 - s) M(t - 1, f) + sE(t, f)$$
 
 The PCEN output is:
 
+
 $$\mathrm{PCEN}(t, f) = \left( \frac{E(t, f)}{(\epsilon + M(t, f))^\alpha} + \delta \right)^r - \delta^r$$
 
-where:
+**AAM-Softmax Loss:**
+The encoder is fine-tuned using Additive Angular Margin Softmax to compact embeddings for the same speaker:
 
-* $\epsilon$ is a small stabilizing constant
-* $M(t, f)$ is the smoothed local energy estimate
-* $\alpha$ controls noise suppression strength
-* $\delta$ controls the offset
-* $r$ controls compression
-* $s$ controls temporal smoothing
-
-This frontend was important because it made the speaker encoder more stable under real-world noise and reverberation.
-
-### 4.3 Speaker encoder training setup
-
-We fine-tuned ECAPA-TDNN on:
-
-* **VoxCeleb** for speaker identity learning
-* **MUSAN** for noise augmentation
-
-The training objective was **Additive Angular Margin Softmax (AAM-Softmax)**.
-
-### 4.4 AAM-Softmax loss
-
-For a sample $i$ with ground-truth class $y_i$, AAM-Softmax is:
 
 $$L_{\text{AAM}} = -\frac{1}{N}\sum_{i=1}^{N} \log \frac{ e^{s(\cos(\theta_{y_i}) + m)} }{ e^{s(\cos(\theta_{y_i}) + m)} + \sum_{j \neq y_i} e^{s\cos(\theta_j)} }$$
 
-where:
+### 2. FiLM Generator
 
-* $\theta_{y_i}$ is the angle between the feature and the correct class center
-* $m$ is the angular margin
-* $s$ is the scale factor
+Transforms the speaker embedding into modulation parameters:
 
-This loss helps the speaker embeddings become more compact for the same speaker and more separated across different speakers.
 
-### 4.5 What we learned here
+$$\gamma, \beta = \mathrm{MLP}(e_s)$$
 
-This stage worked well because:
+**Architecture:**
 
-* PCEN improved robustness in noisy conditions.
-* VoxCeleb provided strong speaker diversity.
-* AAM-Softmax gave a better embedding structure than plain softmax.
+* `Linear(192 → 128)`
+* `ReLU`
+* `Linear(128 → 384)`
 
-What did not work as well:
+**Output:**
 
-* Training on raw mel features was less stable in our noisy setting.
-* Without MUSAN augmentation, generalization dropped noticeably.
-* If the frontend and encoder were trained inconsistently, the embeddings became less reliable.
+* 192 $\gamma$ parameters
+* 192 $\beta$ parameters
 
----
+These parameters become a biometric gate controlling the TC-ResNet feature space.
 
-## 5. Stage 2: TC-ResNet keyword encoder
+### 3. FiLM-Conditioned TC-ResNet
 
-The keyword encoder was trained completely from scratch using our own synthetic and augmented data pipeline. Unlike ECAPA, this part was not fine-tuned from a pretrained speech model. It was built for keyword representation learning from the ground up.
+Modified TC-ResNet acoustic encoder trained for keyword representation.
 
-### 5.1 Training data
+**Structure:**
 
-We used:
+* Conv Projection
+* Layer 1 (Speaker Independent)
+* Layer 2 (Speaker Independent)
+* Layer 3 (FiLM Conditioned)
 
-* Our custom **`tts_corpus`** dataset (3000-word synthetic keyword corpus containing TTS-generated speakers, hard phonetic negatives, proper nouns, commands, technology vocabulary, and synthetic non-words).
-* **MUSAN** for realistic noise injection
-
-The custom dataset was created to cover many word forms and speaking conditions, so the model could generalize beyond a fixed vocabulary.
-
-### 5.2 Why train from scratch
-
-We wanted the TC-ResNet branch to learn a phonetic embedding space that is suited to arbitrary user-defined keywords. Pretraining on a different task would have biased the model toward a fixed vocabulary, so training from scratch gave us better control.
-
-### 5.3 TC-ResNet block structure
-
-The encoder is structurally divided into Speaker Independent and Speaker Conditioned layers. It is built from:
-
-* A **Learnable PCEN** frontend
-* **SpecAugment**
-* A small **Conv1D** stem (Projection)
-* Three **TCResNet residual blocks** (Layer 1 and Layer 2 are Speaker Independent; Layer 3 is FiLM Conditioned)
-* **Global Average Pooling**
-* A final **Linear** layer
-* **L2 normalization** yielding a 128-D keyword template
-
-### 5.4 Architecture diagram
+**Keyword Encoder Flowchart:**
 
 ```mermaid
 flowchart TD
@@ -183,191 +190,182 @@ flowchart TD
 
 ```
 
-### 5.5 TC-ResNet block design
-
+**TC-ResNet Block Design:**
 Each block follows the residual pattern:
+
 
 $$\text{Output} = \mathrm{ReLU}(F(x) + x)$$
 
-where $F(x)$ is the stacked convolutional transformation.
+**FiLM Modulation:**
+The features are dynamically altered using the generated parameters:
 
-The blocks progressively increase channel capacity:
-
-* Block 1: $32 \rightarrow 48$
-* Block 2: $48 \rightarrow 64$
-* Block 3: $64 \rightarrow 96$
-
-The stride and dilation settings help the network capture longer phonetic context without making the model too large.
-
-### 5.6 SpecAugment
-
-We also used SpecAugment during training to improve robustness. It applies:
-
-* Frequency masking
-* Time masking
-
-This helped the encoder avoid overfitting to clean and narrow acoustic patterns.
-
-### 5.7 Keyword encoder training objective
-
-The TC-ResNet branch was trained using **Supervised Contrastive Learning** to produce meaningful keyword embeddings. The embeddings are normalized so that distance-based or metric-learning objectives behave better.
-
-A common formulation for triplet learning is:
-
-$$L_{\text{triplet}} = \max\left( 0,\, \|f(A) - f(P)\|_2^2 - \|f(A) - f(N)\|_2^2 + \alpha \right)$$
-
-where:
-
-* $A$ is the anchor
-* $P$ is the positive sample
-* $N$ is the negative sample
-* $\alpha$ is the margin
-
-### 5.8 What worked and what did not
-
-What worked:
-
-* Training from scratch on the custom TTS corpus gave good flexibility.
-* MUSAN noise made the keyword branch more robust in realistic environments.
-* PCEN + SpecAugment improved stability under noise.
-
-What did not work as well:
-
-* Training without the custom synthetic corpus did not generalize well to unseen words.
-* A plain fixed softmax vocabulary would not fit the open-set custom keyword setting.
-* Without augmentation, the embedding space became too sensitive to clean-speech bias.
-
----
-
-## 6. Quad-state dataset for FiLM + Neural Comparator
-
-After the ECAPA speaker encoder and TC-ResNet keyword encoder were prepared, the final FiLM + Neural Comparator modules were trained using a specially designed **quad-state dataset**.
-
-This directly teaches the model the boundary between speaker identity and word identity by managing collision mixing (target speaker + interfering speaker) and biometric negative sampling.
-
-### 6.1 The four states
-
-Each training example belongs to one of these cases:
-
-| Case | Speaker | Word | Label |
-| --- | --- | --- | --- |
-| **Positive Pair** | Target speaker | Target keyword | Positive |
-| **Negative Pair** | Wrong speaker | Target keyword | Negative |
-| **Hard Negative Pair** | Target speaker | Phonetically similar word | Negative |
-| **False speaker, false word** | Wrong speaker | Wrong keyword | Negative |
-
-This means the model does not only see “correct” and “incorrect” examples. It sees the four meaningful combinations that matter in real use.
-
-### 6.2 Why this dataset matters
-
-Without this setup, the system could easily learn the wrong shortcut:
-
-* Only speaker identity
-* Only word identity
-* Or a weak mixture of both
-
-The quad-state formulation forces the model to treat speaker information and keyword information as two separate factors and then combine them properly at the final decision stage.
-
-### 6.3 FiLM conditioning
-
-The 192-D speaker embedding is injected into the keyword pathway (specifically at TC-ResNet Layer 3) using a **Feature-wise Linear Modulation (FiLM) Generator**.
-
-The FiLM Generator architecture uses a `Linear(192 → 128) -> ReLU -> Linear(128 → 384)` mapping.
-
-If $F \in \mathbb{R}^{C \times T}$ is a feature map and the speaker embedding is $e_s$, then:
-
-$$\gamma, \beta = \mathrm{MLP}(e_s)$$
-
-The generator yields 192 $\gamma$ (gamma) parameters and 192 $\beta$ (beta) parameters, and the final feature transformation is:
 
 $$F'_{c,t} = \gamma_c F_{c,t} + \beta_c$$
 
-This lets the speaker representation reshape the keyword features dynamically, acting as a biometric gate that amplifies acoustic patterns consistent with the enrolled speaker while suppressing competing voices.
+This allows the network to dynamically amplify acoustic patterns consistent with the enrolled speaker while suppressing competing voices.
 
-### 6.4 Neural Comparator
+**Contrastive Objective:**
 
-Instead of comparing embeddings only with a fixed cosine similarity threshold, SC-TKWS uses a learned comparator.
 
-The comparator architecture uses a `Linear(384, 32) -> ReLU -> Linear(32, 1)` network, receiving:
+$$L_{\text{triplet}} = \max\left( 0,\, \|f(A) - f(P)\|_2^2 - \|f(A) - f(N)\|_2^2 + \alpha \right)$$
 
-* The master keyword template ($w_c$)
-* The live keyword embedding ($w_{\text{live}}$)
+### 4. Neural Comparator
 
-A useful comparison tensor is constructed via concatenation:
+Instead of a fixed cosine threshold, SC-TKWS uses a learned comparator to evaluate the relationship between the master template ($w_c$) and the live embedding ($w_{\text{live}}$).
+
+**Input Construction:**
+
 
 $$V_{\text{comp}} = [w_c \,\|\, w_{\text{live}} \,\|\, (w_c - w_{\text{live}}) \,\|\, (w_c \odot w_{\text{live}})]$$
 
-The final output probability is:
+**Architecture:**
+
+* `Linear(384, 32)`
+* `ReLU`
+* `Linear(32, 1)`
+
+**Output Probability:**
+
 
 $$P_{\text{match}} = \sigma\left(W_2 \cdot \mathrm{ReLU}(W_1 V_{\text{comp}} + b_1) + b_2\right)$$
 
-This helped the model learn non-linear similarity patterns instead of relying only on geometric distance, drastically improving robustness against noise, speaker leakage, and hard phonetic negatives.
-
-### 6.5 Why this stage was trained from scratch
-
-We trained the FiLM + Neural Comparator block from scratch because:
-
-* It is task-specific
-* It must learn our custom four-case decision boundary
-* Pretrained speech models do not directly capture this joint decision problem
-
-### 6.6 What worked and what did not
-
-What worked:
-
-* Quad-state training reduced false acceptances.
-* FiLM conditioning improved speaker-specific keyword detection.
-* The learned comparator was more flexible than raw cosine similarity.
-
-What did not work as well:
-
-* Training only on positive samples caused overfitting.
-* Training without the false-speaker / false-word cases made the decision boundary too weak.
-* A static similarity threshold was not enough for robust noisy speech.
+This improves robustness against noise, similar sounding words, speaker leakage, and hard phonetic negatives.
 
 ---
 
-## 7. End-to-end training philosophy
+## Model Statistics
 
-The project was built and executed in four distinct stages rather than as one giant model.
+| Component | Parameter Count |
+| --- | --- |
+| **FiLM Generator** | ≈ 74K |
+| **FiLM-TC-ResNet Encoder** | ≈ 286K |
+| **Neural Comparator** | ≈ 12K |
+| **Total Stage-4 KWS Stack** | **≈ 372K** |
 
-* **Stage 1 — Speaker Representation Learning:** Fine-tune ECAPA-TDNN with PCEN on VoxCeleb for speaker verification using AAM-Softmax, extracting 192-D speaker embeddings. Generates `ecapa_tdnn.onnx` and `ecapa_pcen.json`.
-* **Stage 2 — Keyword Representation Learning:** Train TC-ResNet from scratch on the 3000-word custom TTS corpus with MUSAN augmentation, using Supervised Contrastive Learning to yield 128-D keyword embeddings. Generates `conditioned_encoder.onnx` and `kws_pcen.json`.
-* **Stage 3 — Speaker Conditioning:** Learn speaker-aware acoustic filtering. Using collision mixing and biometric negative sampling, only the FiLM Generator, Layer 3, and the Projection Head remain trainable under a supervised contrastive loss.
-* **Stage 4 — Comparator Fine-Tuning:** Optimize final verification accuracy by training the Neural Comparator on the quad-state dataset combinations (positive, negative, and hard negative pairs) using a loss combination of Binary Cross-Entropy (BCE) Loss and Margin Ranking Loss.
-
-This staged process was useful because each module could learn its own role before being combined into the final system.
-
----
-
-## 8. High-level summary of the final architecture
-
-* **PCEN frontend** gives noise-robust acoustic normalization.
-* **ECAPA-TDNN** learns a strong speaker embedding.
-* **TC-ResNet** learns a keyword embedding from custom training data.
-* **FiLM** injects speaker identity into the keyword pathway.
-* **Neural Comparator** makes the final accept/reject decision.
-* **Quad-state training** makes the decision boundary explicit and reliable.
+*(Note: Total excludes the ECAPA-TDNN speaker encoder which is only used during enrollment.)*
 
 ---
 
-## 9. What we found most important
+## Training Pipeline
 
-The most important design choice was not a single model, but the way the modules were trained together.
+The model was trained sequentially in four stages to ensure each module learned its specific role before being combined.
 
-The final system worked because:
+### Stage 1 — Speaker Representation Learning
 
-* The speaker branch was trained for identity,
-* The keyword branch was trained for phonetics,
-* The conditioning and decision modules were iteratively fine-tuned on all realistic positive/negative/hard-negative combinations,
-* and noise augmentation was used throughout.
+* **Model:** ECAPA-TDNN
+* **Objective:** Speaker verification
+* **Output:** 192-D speaker embeddings
+* **Artifacts:** `ecapa_tdnn.onnx`, `ecapa_pcen.json`
 
-That combination is what made the architecture practical, robust, and lightweight enough for cross-platform, edge-deployed speaker-conditioned keyword spotting.
+### Stage 2 — Keyword Representation Learning
+
+* **Model:** TC-ResNet
+* **Objective:** Supervised Contrastive Learning
+* **Dataset:** 3000-word synthetic keyword corpus containing TTS-generated speakers, hard phonetic negatives, proper nouns, commands, technology vocabulary, and synthetic non-words.
+* **Output:** 128-D keyword embeddings
+* **Artifacts:** `conditioned_encoder.onnx`, `kws_pcen.json`
+
+### Stage 3 — Speaker Conditioning
+
+* **Goal:** Learn speaker-aware acoustic filtering.
+* **Training Strategy:** Collision mixing (target speaker + interfering speaker), biometric negative sampling, and supervised contrastive loss.
+* **Trainable Modules:** Only the FiLM Generator, Layer 3, and Projection Head were updated.
+
+### Stage 4 — Comparator Fine-Tuning
+
+* **Goal:** Optimize final verification accuracy.
+* **Training Signals:**
+* *Positive Pair:* Correct Speaker + Correct Word
+* *Negative Pair:* Wrong Speaker + Correct Word
+* *Hard Negative Pair:* Correct Speaker + Phonetically Similar Word
+
+
+* **Loss Function:** BCE Loss + Margin Ranking Loss
 
 ---
 
-## 10. Datasets used
+## Enrollment
 
-* **VoxCeleb**: Speaker representation learning
-* **MUSAN**: Noise injection and robustness
-* **`tts_corpus`**: Custom keyword training from scratch
+Enroll a user with three recordings of the target keyword.
+
+```bash
+python enroll.py \
+    accept1.wav \
+    accept2.wav \
+    accept3.wav \
+
+```
+
+Generated profile:
+
+```json
+{
+  "gamma": "...",
+  "beta": "...",
+  "template": "..."
+}
+
+```
+
+---
+
+## Verification
+
+```bash
+python inference.py \
+    --audio query.wav \
+    --profile profile.json
+
+```
+
+Output:
+
+```text
+Probability: 0.983
+Match: True
+
+```
+
+---
+
+## ONNX Deployment
+
+All inference modules are exported to ONNX to ensure efficient cross-platform execution.
+
+**Artifacts:**
+
+* `ecapa_tdnn.onnx`
+* `film_generator.onnx`
+* `conditioned_encoder.onnx`
+* `neural_comparator.onnx`
+
+**Advantages:**
+
+* CPU inference
+* Edge deployment
+* Cross-platform compatibility
+* No PyTorch dependency required during inference
+
+---
+
+## Repository Structure
+
+```text
+speaker-conditioned-target-kws/
+│
+├── enroll.py
+├── inference.py
+├── model.py
+├── requirements.txt
+│
+├── models/
+│   ├── ecapa_tdnn.onnx
+│   ├── ecapa_pcen.json
+│   ├── film_generator.onnx
+│   ├── conditioned_encoder.onnx
+│   ├── kws_pcen.json
+│   └── neural_comparator.onnx
+│
+└── enrolled_profile.json
+
+```

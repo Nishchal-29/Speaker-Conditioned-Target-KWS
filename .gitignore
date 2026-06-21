@@ -5,10 +5,12 @@ __pycache__/
 # Datasets
 data/
 noise_dataset/
+film_neural_comparator/tts_corpus_processed/
 
 # Model checkpoints
 finetuned_models/
 ecapa_tdnn/finetuned_models/
+# tc_resnet/tc_resnet_output/
 
 # Outputs
 # tc_resnet/

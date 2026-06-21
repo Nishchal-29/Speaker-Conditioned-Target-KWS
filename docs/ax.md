@@ -1,4 +1,4 @@
-# Speaker-Conditioned Target Keyword Spotting (SC-TKWS)
+# Speech Disentanglement System
 
 A zero-shot, speaker-aware keyword spotting system that triggers **only when the enrolled speaker says the enrolled keyword**.
 

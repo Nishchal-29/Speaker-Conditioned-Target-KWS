@@ -22,7 +22,12 @@
 - **Paper:** https://arxiv.org/abs/1904.03814
 - **Reference Implementation:** https://github.com/hyperconnect/TC-ResNet
 - **Description:** TC-ResNet is a lightweight residual convolutional architecture designed for speech and audio processing tasks. It employs temporal convolutional residual blocks to efficiently model temporal dependencies in speech signals while maintaining a low computational footprint. Used to get teh 128-D embedding representing a particular word.
-- **Models Published** - *(In case you have developed a model as a part of your solution, kindly upload it on Hugging Face under appropriate open source license and add the link here.)*
+## Models Published
+
+### 1. Speaker Conditioned Target KWS
+- **Link:** https://huggingface.co/Nishchal-29/speaker-conditioned-target-kws
+- **Description:** A zero-shot, speaker-aware keyword spotting system that triggers only when the enrolled speaker says the enrolled keyword.
+
 ## Datasets Used
 
 ### 1. VoxCeleb1 & VoxCeleb2

@@ -5,9 +5,9 @@
 - **Team name** - TechHunters
 - **Team members (Names)** - Nishchal Kumar Singh, Pranay Shit
 - **Institute/College Name** - IIT (ISM) Dhanbad 
-- **Final Presentation Google Drive Link** - *Upload the PDF presentation for your final submission on Google Drive (It should be openly accessible and not behind any login wall)*
-- **Full Submission Demo Video Link** - *(Upload the Demo video on Youtube as a public or unlisted video and share the link. Google Drive uploads for video is not allowed.)*
-- **Setup & Result Reproducibility Video Link** - *(Upload the Demo video on Youtube as a public or unlisted video and share the link. Google Drive uploads for video is not allowed.)*
+- **Final Presentation Google Drive Link** - https://drive.google.com/file/d/1oLY4p6RZ1qtKqkZiOptaRb6Amcwdd_4C/view?usp=sharing
+- **Full Submission Demo Video Link** - https://youtu.be/I9eDN023N2k
+- **Setup & Result Reproducibility Video Link** - https://youtu.be/1yZgvMwOBZI
 
 ### Project Artefacts
 
@@ -46,23 +46,3 @@
 - **Link:** https://huggingface.co/datasets/Nishchal-29/tts_corpus
 - **Description:** A Text-to-Speech (TTS) corpus created for speech synthesis and speaker modeling experiments. The dataset contains recordings from **20 speakers**, with **4 utterances per speaker**, covering approximately **200 unique words**. It is designed to provide a compact, multi-speaker speech dataset suitable for prototyping, benchmarking, and educational research in TTS and speech processing.
 - **Usage in Project:** It is used for our custom keyword detection, This dataset consists of some custom keywords so that our model can generalize patterns for incoming new words.
-
-#### Final Presentation
-
-Unlike Phase 1 presentation, in Phase 2 you can freely decide the template, flow and content of your technical presentation. Ensure you cover all aspects of your solution - innovation, novelty, architecture, open datasets/models developed and used, final deliverable details, KPIs of your solution, AI/Agent use, any other details. 
-
-#### Full Submission Demo Video
-
-Create a high quality video demonstration your solution in real life and showcasing how it is actually solves the proposed AX Hackathon problem.
-
-#### Setup & Result Reproducibility Video
-
-To ensure reproducibility of results and to verify the presented KPIs, we require you to create a video demonstrating:
-- Step by step project installation,
-- Data/model download steps, 
-- Execution of all required codes to train the developed models (if any)
-- Execution of all evaluation codes to reproduce the presented results/KPIs 
-
-### Attribution 
-
-In case this project is built on top of an existing open source project, please provide the original project link here. Also, mention what new features were developed. Failing to attribute the source projects may lead to disqualification during the time of evaluation.

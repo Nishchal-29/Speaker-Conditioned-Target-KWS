@@ -173,7 +173,7 @@ rm data/musan.tar.gz
 
 ### 3C. TTS Corpus Dataset
 
-The TTS corpus is a custom keyword dataset generated using TTS models (edge-tts). It contains recordings from **20 speakers**, **4 utterances per speaker**, covering ~**200 unique words**. You have two options:
+The TTS corpus is a custom keyword dataset generated using TTS models (edge-tts). It contains recordings from **37 speakers**, **4 utterances per speaker**, covering ~**3000 unique words** with **148 audio files for each speaker**. You have two options:
 
 #### Option A — Download from Hugging Face (Recommended)
 

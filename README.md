@@ -44,5 +44,5 @@
 
 ### TTS Corpus Dataset
 - **Link:** https://huggingface.co/datasets/Nishchal-29/tts_corpus
-- **Description:** A Text-to-Speech (TTS) corpus created for speech synthesis and speaker modeling experiments. The dataset contains recordings from **20 speakers**, with **4 utterances per speaker**, covering approximately **200 unique words**. It is designed to provide a compact, multi-speaker speech dataset suitable for prototyping, benchmarking, and educational research in TTS and speech processing.
+- **Description:** A Text-to-Speech (TTS) corpus created for speech synthesis and speaker modeling experiments. The dataset contains recordings from **37 speakers**, with **4 utterances per speaker**, covering approximately **3000 unique words** with **148** audio files for each word. It is designed to provide a compact, multi-speaker speech dataset suitable for prototyping, benchmarking, and educational research in TTS and speech processing.
 - **Usage in Project:** It is used for our custom keyword detection, This dataset consists of some custom keywords so that our model can generalize patterns for incoming new words.

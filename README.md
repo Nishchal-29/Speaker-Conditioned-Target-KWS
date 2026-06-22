@@ -5,7 +5,7 @@
 - **Team name** - TechHunters
 - **Team members (Names)** - Nishchal Kumar Singh, Pranay Shit
 - **Institute/College Name** - IIT (ISM) Dhanbad 
-- **Final Presentation Google Drive Link** - https://drive.google.com/file/d/1oLY4p6RZ1qtKqkZiOptaRb6Amcwdd_4C/view?usp=sharing
+- **Final Presentation Google Drive Link** - https://docs.google.com/presentation/d/1WG1qSha57J4CGtfuC36lCe_uXPE-ildv/edit?usp=sharing&ouid=106388510580891590661&rtpof=true&sd=true
 - **Full Submission Demo Video Link** - https://youtu.be/I9eDN023N2k
 - **Setup & Result Reproducibility Video Link** - https://youtu.be/1yZgvMwOBZI
 
